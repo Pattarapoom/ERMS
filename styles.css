@@ -1604,7 +1604,9 @@ textarea {
   }
 
   .header {
-    padding: 0 4px;
+    height: auto;
+    min-height: var(--header-h);
+    padding: 6px 8px;
     gap: 0;
     justify-content: space-between;
   }
@@ -1619,22 +1621,30 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: center;
+    align-self: flex-start;
   }
 
   .header-right {
-    flex: 1;
-    display: flex;
-    justify-content: flex-end;
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "month auth";
+    justify-content: stretch;
     align-items: center;
-    gap: 4px;
-    overflow: hidden;
+    column-gap: 6px;
+    row-gap: 6px;
+    overflow: visible;
+    min-width: 0;
   }
 
   .month-selector {
+    grid-area: month;
     background: rgba(255, 255, 255, 0.18);
     padding: 2px;
     gap: 0;
-    max-width: 160px;
+    max-width: none;
+    width: 100%;
+    min-width: 0;
     justify-content: space-between;
     height: 38px;
     border-radius: 20px;
@@ -1649,7 +1659,7 @@ textarea {
   .month-label {
     font-size: 13px;
     font-weight: 700;
-    min-width: 90px;
+    min-width: 0;
     text-align: center;
     padding: 2px 4px 0;
     /* Padding-top to fix crooked Sarabun text */
@@ -1658,9 +1668,13 @@ textarea {
     justify-content: center;
     align-items: center;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .auth-action-area {
+    grid-area: auth;
+    justify-self: end;
     margin-left: 0;
     padding-left: 0;
     border-left: none;

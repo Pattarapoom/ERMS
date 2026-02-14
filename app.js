@@ -23,6 +23,8 @@ let activeRoleMins = {};
 let activeRoleLabels = {};
 let firebaseDb = null;
 let firebaseReady = false;
+let monthScheduleUnsubscribe = null;
+let lastMobileTodayFocusKey = null;
 
 // ──────────────── Init ────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -37,6 +39,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderUserProfile();
     renderAll();
     bindEvents();
+    if (firebaseReady) {
+        subscribeMonthSchedule(currentYear, currentMonth);
+    }
 });
 
 // ──────────────── Firebase Sync ────────────────
@@ -108,14 +113,47 @@ async function syncInitialDataFromFirebase() {
         if (remoteSettings.config && typeof remoteSettings.config === 'object') {
             localStorage.setItem('erms_config', JSON.stringify(remoteSettings.config));
         }
+    } else {
+        const localNurses = localStorage.getItem('erms_nurses');
+        const localConfig = localStorage.getItem('erms_config');
+        if (localNurses || localConfig) {
+            const payload = {
+                nurses: localNurses ? JSON.parse(localNurses) : SAMPLE_NURSES,
+                config: localConfig ? JSON.parse(localConfig) : {
+                    quota: SHIFT_QUOTA,
+                    roleMins: ROLE_MINIMUMS,
+                    roleLabels: ROLE_LABELS
+                },
+                updatedAt: new Date().toISOString()
+            };
+            void firebaseSet('erms/settings', payload);
+        }
     }
 
     if (Array.isArray(remoteRequests)) {
         localStorage.setItem('erms_requests', JSON.stringify(remoteRequests));
+    } else {
+        const localRequests = localStorage.getItem('erms_requests');
+        if (localRequests) {
+            try {
+                void firebaseSet('erms/requests', JSON.parse(localRequests));
+            } catch (err) {
+                console.warn('[ERMS] local requests parse failed:', err);
+            }
+        }
     }
 
     if (remoteSchedule && typeof remoteSchedule === 'object') {
         localStorage.setItem(getStorageKey(), JSON.stringify(remoteSchedule));
+    } else {
+        const localSchedule = localStorage.getItem(getStorageKey());
+        if (localSchedule) {
+            try {
+                void firebaseSet(getFirebaseSchedulePath(), JSON.parse(localSchedule));
+            } catch (err) {
+                console.warn('[ERMS] local schedule parse failed:', err);
+            }
+        }
     }
 }
 
@@ -137,6 +175,28 @@ function saveSettingsToFirebase() {
         updatedAt: new Date().toISOString()
     };
     void firebaseSet('erms/settings', payload);
+}
+
+function subscribeMonthSchedule(year = currentYear, month = currentMonth) {
+    if (!firebaseReady || !firebaseDb) return;
+    if (monthScheduleUnsubscribe) {
+        monthScheduleUnsubscribe();
+        monthScheduleUnsubscribe = null;
+    }
+
+    const path = getFirebaseSchedulePath(year, month);
+    const ref = firebaseDb.ref(path);
+    const handler = (snapshot) => {
+        const data = snapshot.val();
+        if (!data || typeof data !== 'object') return;
+        localStorage.setItem(getStorageKey(year, month), JSON.stringify(data));
+        if (year === currentYear && month === currentMonth) {
+            loadFromStorage();
+            renderAll();
+        }
+    };
+    ref.on('value', handler);
+    monthScheduleUnsubscribe = () => ref.off('value', handler);
 }
 
 // ──────────────── Settings Persistence ────────────────
@@ -421,6 +481,7 @@ async function changeMonth(delta) {
     renderMonthLabel();
     if (firebaseReady) {
         await syncMonthFromFirebase(currentYear, currentMonth);
+        subscribeMonthSchedule(currentYear, currentMonth);
     }
     loadFromStorage();
     renderAll();
@@ -547,12 +608,33 @@ function renderAll() {
     renderUserProfile(); // Update profile area
     if (scheduler) {
         renderCalendar();
+        focusTodayOnMobile();
         if (currentTab === 'stats') renderStats(); // Only render stats if scheduler exists and is locked (handled by renderStats itself)
         renderNotifications();
         updateAlertBadge();
     } else {
         renderEmptyState();
     }
+}
+
+function focusTodayOnMobile() {
+    if (!scheduler) return;
+    if (!window.matchMedia('(max-width: 900px)').matches) return;
+    if (currentTab !== 'calendar') return;
+
+    const now = new Date();
+    if (currentYear !== now.getFullYear() || currentMonth !== now.getMonth()) return;
+
+    const key = `${currentYear}_${currentMonth}`;
+    if (lastMobileTodayFocusKey === key) return;
+
+    const todayCard = document.querySelector('.day-card.today');
+    if (!todayCard) return;
+
+    setTimeout(() => {
+        todayCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        lastMobileTodayFocusKey = key;
+    }, 50);
 }
 
 function renderStatus() {
