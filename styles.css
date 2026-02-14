@@ -379,9 +379,24 @@ body {
 .auth-action-area {
   display: flex;
   align-items: center;
+  gap: 8px;
   margin-left: 12px;
   padding-left: 16px;
   border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.header-user-chip {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: var(--radius-full);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  max-width: 120px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
 }
 
 /* ──────────────── Header Buttons ──────────────── */
@@ -1707,6 +1722,12 @@ textarea {
     flex: 0 0 auto;
   }
 
+  .header-user-chip {
+    max-width: 86px;
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+
   .btn-login-trigger-prominent,
   .btn-logout-prominent {
     padding: 6px;
@@ -1746,8 +1767,9 @@ textarea {
     padding: 12px;
   }
 
+  #navCalendar,
   #navRequestStatus {
-    display: flex;
+    display: flex !important;
   }
 
   .modal-overlay {

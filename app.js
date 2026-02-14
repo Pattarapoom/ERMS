@@ -14,7 +14,7 @@ let currentSettingsTab = 'nurses';
 let selectedSwap = { nurseId: null, dateStr: null, shift: null };
 let pendingRole = null;
 let bellTab = 'alerts';
-let isSidebarCollapsed = localStorage.getItem('erms_sidebar_collapsed') === 'true';
+let isSidebarCollapsed = false;
 
 // Global configurations (Defaults from data.js)
 let activeNurses = [];
@@ -24,6 +24,7 @@ let activeRoleLabels = {};
 let firebaseDb = null;
 let firebaseReady = false;
 let monthScheduleUnsubscribe = null;
+let requestsUnsubscribe = null;
 let lastMobileTodayFocusKey = null;
 
 // ──────────────── Init ────────────────
@@ -41,6 +42,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     bindEvents();
     if (firebaseReady) {
         subscribeMonthSchedule(currentYear, currentMonth);
+        subscribeRequests();
     }
 });
 
@@ -199,6 +201,40 @@ function subscribeMonthSchedule(year = currentYear, month = currentMonth) {
     monthScheduleUnsubscribe = () => ref.off('value', handler);
 }
 
+function subscribeRequests() {
+    if (!firebaseReady || !firebaseDb) return;
+    if (requestsUnsubscribe) {
+        requestsUnsubscribe();
+        requestsUnsubscribe = null;
+    }
+
+    const ref = firebaseDb.ref('erms/requests');
+    let isFirstSnapshot = true;
+    const handler = (snapshot) => {
+        const prevIds = new Set(requests.map(r => r.id));
+        const data = snapshot.val();
+        requests = Array.isArray(data) ? data : [];
+        localStorage.setItem('erms_requests', JSON.stringify(requests));
+
+        if (!isFirstSnapshot && isAdmin) {
+            const newPending = requests.filter(r =>
+                !prevIds.has(r.id) && typeof r.status === 'string' && r.status.includes('pending')
+            );
+            if (newPending.length > 0) {
+                showToast('info', `มีคำขอใหม่ ${newPending.length} รายการ`);
+            }
+        }
+        isFirstSnapshot = false;
+
+        if (currentTab === 'requestStatus') renderRequestStatus();
+        if (currentTab === 'approval') renderApprovalView();
+        renderAll();
+    };
+
+    ref.on('value', handler);
+    requestsUnsubscribe = () => ref.off('value', handler);
+}
+
 // ──────────────── Settings Persistence ────────────────
 function initSettings() {
     const nurses = localStorage.getItem('erms_nurses');
@@ -277,7 +313,11 @@ function renderUserProfile() {
             </div>`;
 
         // Render Logout button at the far right of header
+        const shortName = currentUser === 'admin'
+            ? 'Admin'
+            : (name || currentUser).replace(/^(พว\.|พว|พ\.ว\.|พ\.ว|พยาบาล)\s*/, '').split(' ')[0];
         actionArea.innerHTML = `
+            <div class="header-user-chip" title="${escAttr(name)}">${escHtml(shortName)}</div>
             <button class="btn-logout-prominent" onclick="userLogout()">
                 <span class="material-symbols-rounded">logout</span>
                 <span>ออกจากระบบ</span>
@@ -470,7 +510,20 @@ function bindEvents() {
 
 // ──────────────── Sidebar ────────────────
 function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
+    const sidebar = document.getElementById('sidebar');
+    const layout = document.querySelector('.app-layout');
+    if (!sidebar) return;
+
+    if (window.matchMedia('(max-width: 900px)').matches) {
+        sidebar.classList.toggle('open');
+        return;
+    }
+
+    // Desktop: force full menu (no collapsed icon-only mode)
+    isSidebarCollapsed = false;
+    localStorage.setItem('erms_sidebar_collapsed', 'false');
+    sidebar.classList.remove('collapsed');
+    if (layout) layout.classList.remove('sidebar-collapsed');
 }
 
 // ──────────────── Month Navigation ────────────────
@@ -2075,20 +2128,6 @@ function resetToSourceData() {
     setTimeout(() => {
         window.location.reload();
     }, 1000);
-}
-
-// ──────────────── Navigation ────────────────
-function toggleSidebar() {
-    isSidebarCollapsed = !isSidebarCollapsed;
-    localStorage.setItem('erms_sidebar_collapsed', isSidebarCollapsed);
-
-    const sidebar = document.getElementById('sidebar');
-    const layout = document.querySelector('.app-layout');
-
-    if (sidebar && layout) {
-        sidebar.classList.toggle('collapsed', isSidebarCollapsed);
-        layout.classList.toggle('sidebar-collapsed', isSidebarCollapsed);
-    }
 }
 
 // ──────────────── Import ────────────────
