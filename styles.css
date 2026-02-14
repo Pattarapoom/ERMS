@@ -1604,35 +1604,40 @@ textarea {
   }
 
   .header {
-    padding: 0 6px;
-    gap: 4px;
+    padding: 0 4px;
+    gap: 0;
     justify-content: space-between;
   }
 
-  /* Hide breadcrumb and status badges on mobile to save space */
   .header-breadcrumb,
   .status-badges {
     display: none !important;
   }
 
   .header-left {
-    flex: 0 0 auto;
+    flex: 0 0 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .header-right {
-    gap: 4px;
     flex: 1;
     display: flex;
     justify-content: flex-end;
     align-items: center;
+    gap: 4px;
+    overflow: hidden;
   }
 
   .month-selector {
+    background: rgba(255, 255, 255, 0.18);
     padding: 2px;
     gap: 0;
-    max-width: 155px;
+    max-width: 160px;
     justify-content: space-between;
-    height: 36px;
+    height: 38px;
+    border-radius: 20px;
   }
 
   .month-selector button {
@@ -1643,13 +1648,16 @@ textarea {
 
   .month-label {
     font-size: 13px;
+    font-weight: 700;
     min-width: 90px;
     text-align: center;
-    padding: 0 4px;
+    padding: 2px 4px 0;
+    /* Padding-top to fix crooked Sarabun text */
     flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
+    white-space: nowrap;
   }
 
   .auth-action-area {
