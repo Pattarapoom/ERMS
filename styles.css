@@ -1596,6 +1596,7 @@ textarea {
 
   .main-area {
     margin-left: 0;
+    width: 100%;
   }
 
   .menu-toggle {
@@ -1603,15 +1604,69 @@ textarea {
   }
 
   .header {
-    padding: 0 16px;
+    padding: 0 12px;
+    gap: 8px;
+  }
+
+  /* Hide breadcrumb on mobile to save space */
+  .header-breadcrumb {
+    display: none;
+  }
+
+  .header-right {
+    gap: 8px;
+    flex: 1;
+    justify-content: flex-end;
+  }
+
+  .month-selector {
+    padding: 2px 4px;
+    gap: 4px;
+  }
+
+  .month-label {
+    font-size: 13px;
+    min-width: 80px;
+  }
+
+  .auth-action-area {
+    margin-left: 4px;
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .btn-login-trigger-prominent,
+  .btn-logout-prominent {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .btn-login-trigger-prominent span:not(.material-symbols-rounded),
+  .btn-logout-prominent span:not(.material-symbols-rounded) {
+    display: none;
+    /* Icon only on small mobile if needed, or just smaller text */
+  }
+
+  /* Show text back if screen is at least 400px */
+  @media (min-width: 400px) {
+
+    .btn-login-trigger-prominent span:not(.material-symbols-rounded),
+    .btn-logout-prominent span:not(.material-symbols-rounded) {
+      display: inline;
+    }
   }
 
   .main-content {
-    padding: 16px;
+    padding: 12px;
   }
 
   .calendar-grid {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .day-card {
+    min-height: auto;
   }
 }
 
