@@ -313,11 +313,7 @@ function renderUserProfile() {
             </div>`;
 
         // Render Logout button at the far right of header
-        const shortName = currentUser === 'admin'
-            ? 'Admin'
-            : (name || currentUser).replace(/^(พว\.|พว|พ\.ว\.|พ\.ว|พยาบาล)\s*/, '').split(' ')[0];
         actionArea.innerHTML = `
-            <div class="header-user-chip" title="${escAttr(name)}">${escHtml(shortName)}</div>
             <button class="btn-logout-prominent" onclick="userLogout()">
                 <span class="material-symbols-rounded">logout</span>
                 <span>ออกจากระบบ</span>
@@ -382,6 +378,7 @@ function handleLogin() {
 
 function updateVisibility() {
     const isLogged = !!currentUser;
+    document.body.classList.toggle('is-admin', !!isAdmin);
 
     // Toggle login-only elements
     document.querySelectorAll('.login-only').forEach(el => {

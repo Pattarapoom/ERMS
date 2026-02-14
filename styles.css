@@ -666,6 +666,10 @@ body {
   display: none;
 }
 
+body.is-admin #navRequestStatus {
+  display: flex;
+}
+
 /* Buttons */
 .btn {
   border-radius: var(--radius-full);
@@ -1723,9 +1727,7 @@ textarea {
   }
 
   .header-user-chip {
-    max-width: 86px;
-    padding: 6px 8px;
-    font-size: 11px;
+    display: none;
   }
 
   .btn-login-trigger-prominent,
