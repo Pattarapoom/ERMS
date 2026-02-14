@@ -647,7 +647,7 @@ body {
   font-size: 32px;
 }
 
-.mobile-quick-actions {
+#navRequestStatus {
   display: none;
 }
 
@@ -1746,23 +1746,8 @@ textarea {
     padding: 12px;
   }
 
-  .mobile-quick-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-
-  .mobile-quick-actions .btn {
-    min-height: 44px;
-    width: 100%;
-    justify-content: center;
-    font-size: 13px;
-    padding: 10px 12px;
-  }
-
-  .mobile-quick-actions .material-symbols-rounded {
-    font-size: 18px;
+  #navRequestStatus {
+    display: flex;
   }
 
   .modal-overlay {
