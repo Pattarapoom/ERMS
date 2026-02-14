@@ -1604,55 +1604,71 @@ textarea {
   }
 
   .header {
-    padding: 0 12px;
-    gap: 8px;
+    padding: 0 8px;
+    gap: 4px;
+    justify-content: space-between;
   }
 
-  /* Hide breadcrumb on mobile to save space */
-  .header-breadcrumb {
-    display: none;
+  /* Hide breadcrumb and status badges on mobile to save space */
+  .header-breadcrumb,
+  .status-badges {
+    display: none !important;
+  }
+
+  .header-left {
+    flex: 0 0 auto;
   }
 
   .header-right {
-    gap: 8px;
+    gap: 4px;
     flex: 1;
     justify-content: flex-end;
+    overflow: hidden;
   }
 
   .month-selector {
     padding: 2px 4px;
-    gap: 4px;
+    gap: 2px;
+    max-width: 140px;
   }
 
   .month-label {
-    font-size: 13px;
-    min-width: 80px;
+    font-size: 12px;
+    min-width: 70px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .auth-action-area {
-    margin-left: 4px;
+    margin-left: 2px;
     padding-left: 0;
     border-left: none;
+    flex: 0 0 auto;
   }
 
   .btn-login-trigger-prominent,
   .btn-logout-prominent {
-    padding: 6px 10px;
+    padding: 6px 8px;
     font-size: 12px;
+    min-width: fit-content;
   }
 
   .btn-login-trigger-prominent span:not(.material-symbols-rounded),
   .btn-logout-prominent span:not(.material-symbols-rounded) {
     display: none;
-    /* Icon only on small mobile if needed, or just smaller text */
   }
 
-  /* Show text back if screen is at least 400px */
-  @media (min-width: 400px) {
+  /* Show text back if screen is at least 420px */
+  @media (min-width: 420px) {
 
     .btn-login-trigger-prominent span:not(.material-symbols-rounded),
     .btn-logout-prominent span:not(.material-symbols-rounded) {
       display: inline;
+    }
+
+    .month-selector {
+      max-width: none;
     }
   }
 
