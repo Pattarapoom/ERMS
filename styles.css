@@ -1604,7 +1604,7 @@ textarea {
   }
 
   .header {
-    padding: 0 8px;
+    padding: 0 6px;
     gap: 4px;
     justify-content: space-between;
   }
@@ -1622,26 +1622,38 @@ textarea {
   .header-right {
     gap: 4px;
     flex: 1;
+    display: flex;
     justify-content: flex-end;
-    overflow: hidden;
+    align-items: center;
   }
 
   .month-selector {
-    padding: 2px 4px;
-    gap: 2px;
-    max-width: 140px;
+    padding: 2px;
+    gap: 0;
+    max-width: 155px;
+    justify-content: space-between;
+    height: 36px;
+  }
+
+  .month-selector button {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
   }
 
   .month-label {
-    font-size: 12px;
-    min-width: 70px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 13px;
+    min-width: 90px;
+    text-align: center;
+    padding: 0 4px;
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
   }
 
   .auth-action-area {
-    margin-left: 2px;
+    margin-left: 0;
     padding-left: 0;
     border-left: none;
     flex: 0 0 auto;
@@ -1649,9 +1661,11 @@ textarea {
 
   .btn-login-trigger-prominent,
   .btn-logout-prominent {
-    padding: 6px 8px;
-    font-size: 12px;
-    min-width: fit-content;
+    padding: 6px;
+    min-width: 36px;
+    height: 36px;
+    justify-content: center;
+    border-radius: 50%;
   }
 
   .btn-login-trigger-prominent span:not(.material-symbols-rounded),
@@ -1659,8 +1673,15 @@ textarea {
     display: none;
   }
 
-  /* Show text back if screen is at least 420px */
+  /* Show text and traditional layout if screen is at least 420px */
   @media (min-width: 420px) {
+
+    .btn-login-trigger-prominent,
+    .btn-logout-prominent {
+      padding: 6px 12px;
+      width: auto;
+      border-radius: var(--radius-full);
+    }
 
     .btn-login-trigger-prominent span:not(.material-symbols-rounded),
     .btn-logout-prominent span:not(.material-symbols-rounded) {
@@ -1669,6 +1690,7 @@ textarea {
 
     .month-selector {
       max-width: none;
+      gap: 4px;
     }
   }
 
