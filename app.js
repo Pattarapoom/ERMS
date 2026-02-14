@@ -21,9 +21,15 @@ let activeNurses = [];
 let activeQuota = {};
 let activeRoleMins = {};
 let activeRoleLabels = {};
+let firebaseDb = null;
+let firebaseReady = false;
 
 // ──────────────── Init ────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    initFirebase();
+    if (firebaseReady) {
+        await syncInitialDataFromFirebase();
+    }
     initSettings();
     loadFromStorage();
     loadRequests();
@@ -32,6 +38,106 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAll();
     bindEvents();
 });
+
+// ──────────────── Firebase Sync ────────────────
+function initFirebase() {
+    try {
+        if (typeof firebase === 'undefined' || typeof firebaseConfig === 'undefined') {
+            console.warn('[ERMS] Firebase SDK/config not found, using localStorage only.');
+            return;
+        }
+        if (!firebase.apps || firebase.apps.length === 0) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        firebaseDb = firebase.database();
+        firebaseReady = true;
+    } catch (err) {
+        console.error('[ERMS] Firebase init failed:', err);
+        firebaseReady = false;
+    }
+}
+
+function getFirebaseSchedulePath(year = currentYear, month = currentMonth) {
+    return `erms/schedules/${year}_${month}`;
+}
+
+async function firebaseGet(path) {
+    if (!firebaseReady || !firebaseDb) return null;
+    try {
+        const snapshot = await firebaseDb.ref(path).once('value');
+        return snapshot.val();
+    } catch (err) {
+        console.error(`[ERMS] Firebase read failed at ${path}:`, err);
+        return null;
+    }
+}
+
+async function firebaseSet(path, value) {
+    if (!firebaseReady || !firebaseDb) return false;
+    try {
+        await firebaseDb.ref(path).set(value);
+        return true;
+    } catch (err) {
+        console.error(`[ERMS] Firebase write failed at ${path}:`, err);
+        return false;
+    }
+}
+
+async function firebaseRemove(path) {
+    if (!firebaseReady || !firebaseDb) return false;
+    try {
+        await firebaseDb.ref(path).remove();
+        return true;
+    } catch (err) {
+        console.error(`[ERMS] Firebase remove failed at ${path}:`, err);
+        return false;
+    }
+}
+
+async function syncInitialDataFromFirebase() {
+    const [remoteSettings, remoteRequests, remoteSchedule] = await Promise.all([
+        firebaseGet('erms/settings'),
+        firebaseGet('erms/requests'),
+        firebaseGet(getFirebaseSchedulePath())
+    ]);
+
+    if (remoteSettings && typeof remoteSettings === 'object') {
+        if (Array.isArray(remoteSettings.nurses)) {
+            localStorage.setItem('erms_nurses', JSON.stringify(remoteSettings.nurses));
+        }
+        if (remoteSettings.config && typeof remoteSettings.config === 'object') {
+            localStorage.setItem('erms_config', JSON.stringify(remoteSettings.config));
+        }
+    }
+
+    if (Array.isArray(remoteRequests)) {
+        localStorage.setItem('erms_requests', JSON.stringify(remoteRequests));
+    }
+
+    if (remoteSchedule && typeof remoteSchedule === 'object') {
+        localStorage.setItem(getStorageKey(), JSON.stringify(remoteSchedule));
+    }
+}
+
+async function syncMonthFromFirebase(year = currentYear, month = currentMonth) {
+    const remoteSchedule = await firebaseGet(getFirebaseSchedulePath(year, month));
+    if (remoteSchedule && typeof remoteSchedule === 'object') {
+        localStorage.setItem(getStorageKey(year, month), JSON.stringify(remoteSchedule));
+    }
+}
+
+function saveSettingsToFirebase() {
+    const payload = {
+        nurses: activeNurses,
+        config: {
+            quota: activeQuota,
+            roleMins: activeRoleMins,
+            roleLabels: activeRoleLabels
+        },
+        updatedAt: new Date().toISOString()
+    };
+    void firebaseSet('erms/settings', payload);
+}
 
 // ──────────────── Settings Persistence ────────────────
 function initSettings() {
@@ -63,6 +169,7 @@ function saveGlobalSettings() {
         roleMins: activeRoleMins,
         roleLabels: activeRoleLabels
     }));
+    saveSettingsToFirebase();
 }
 
 // ──────────────── User Identity ────────────────
@@ -206,6 +313,7 @@ function loadRequests() {
 
 function saveRequests() {
     localStorage.setItem('erms_requests', JSON.stringify(requests));
+    void firebaseSet('erms/requests', requests);
 }
 
 function addRequest(type, data) {
@@ -232,8 +340,8 @@ function addRequest(type, data) {
 }
 
 // ──────────────── LocalStorage ────────────────
-function getStorageKey() {
-    return `erms_${currentYear}_${currentMonth}`;
+function getStorageKey(year = currentYear, month = currentMonth) {
+    return `erms_${year}_${month}`;
 }
 
 function saveToStorage() {
@@ -241,6 +349,7 @@ function saveToStorage() {
     const data = scheduler.toJSON();
     data.nurses = activeNurses; // Save current set of nurses
     localStorage.setItem(getStorageKey(), JSON.stringify(data));
+    void firebaseSet(getFirebaseSchedulePath(), data);
 }
 
 function loadFromStorage() {
@@ -305,11 +414,14 @@ function toggleSidebar() {
 }
 
 // ──────────────── Month Navigation ────────────────
-function changeMonth(delta) {
+async function changeMonth(delta) {
     currentMonth += delta;
     if (currentMonth > 11) { currentMonth = 0; currentYear++; }
     if (currentMonth < 0) { currentMonth = 11; currentYear--; }
     renderMonthLabel();
+    if (firebaseReady) {
+        await syncMonthFromFirebase(currentYear, currentMonth);
+    }
     loadFromStorage();
     renderAll();
 }
@@ -414,6 +526,7 @@ function clearSchedule() {
     if (!confirm(`คุณต้องการล้างตารางเวรเดือน ${document.getElementById('monthLabel').innerText} ทั้งหมดใช่หรือไม่?\nข้อมูลจะไม่สามารถกู้คืนได้`)) return;
 
     localStorage.removeItem(getStorageKey());
+    void firebaseRemove(getFirebaseSchedulePath());
     scheduler = null;
     renderAll();
     showToast('success', 'ล้างตารางเวรเรียบร้อยแล้ว');
@@ -1380,6 +1493,7 @@ function saveCrossMonthLeave(dateStr, nurseId, leaveType, urgent, reason) {
     });
 
     localStorage.setItem(key, JSON.stringify(data));
+    void firebaseSet(getFirebaseSchedulePath(year, monthIndex), data);
     return true;
 }
 
@@ -1872,6 +1986,8 @@ function resetToSourceData() {
     localStorage.removeItem('erms_nurses');
     localStorage.removeItem('erms_quota');
     localStorage.removeItem('erms_role_mins');
+    localStorage.removeItem('erms_config');
+    void firebaseRemove('erms/settings');
 
     showToast('info', 'กำลังรีเซ็ตและโหลดข้อมูลใหม่...');
     setTimeout(() => {
