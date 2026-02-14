@@ -359,7 +359,7 @@ function userLogout() {
     isAdmin = false;
 
     updateVisibility();
-    if (currentTab === 'settings') switchTab('calendar');
+    switchTab('calendar');
 
     renderAll();
     showToast('info', 'ออกจากระบบเรียบร้อยแล้ว');

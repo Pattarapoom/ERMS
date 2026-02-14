@@ -475,6 +475,25 @@ body {
   align-items: center;
 }
 
+.home-breadcrumb-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.home-breadcrumb-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: white;
+}
+
 .header-breadcrumb .bc-current {
   color: white;
   font-weight: 700;
@@ -1605,6 +1624,8 @@ textarea {
 
   .menu-toggle {
     display: flex;
+    width: 36px;
+    height: 36px;
   }
 
   .header {
@@ -1621,11 +1642,12 @@ textarea {
   }
 
   .header-left {
-    flex: 0 0 40px;
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: center;
-    align-self: flex-start;
+    align-self: center;
+    margin-right: 6px;
   }
 
   .header-right {

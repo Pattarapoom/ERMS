@@ -21,7 +21,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 
-  <link rel="stylesheet" href="styles.css?v=20260214-2">
+  <link rel="stylesheet" href="styles.css?v=20260214-3">
 </head>
 
 <body>
@@ -46,11 +46,11 @@
 
       <nav class="sidebar-nav">
 
-        <div class="nav-section-title login-only hidden">เมนูหลัก</div>
+        <div class="nav-section-title">เมนูหลัก</div>
 
-        <button class="nav-item active login-only hidden" id="navCalendar" onclick="switchTab('calendar')">
-          <span class="material-symbols-rounded">calendar_month</span>
-          ตารางเวร
+        <button class="nav-item active" id="navCalendar" onclick="switchTab('calendar')">
+          <span class="material-symbols-rounded">home</span>
+          หน้าหลัก
         </button>
 
         <button class="nav-item admin-only hidden" id="navStats" onclick="switchTab('stats')">
@@ -66,7 +66,7 @@
           แจ้งลา / ขอหยุด
         </button>
 
-        <button class="nav-item login-only hidden" id="navRequestStatus" onclick="switchTab('requestStatus')">
+        <button class="nav-item" id="navRequestStatus" onclick="switchTab('requestStatus')">
           <span class="material-symbols-rounded">fact_check</span>
           สถานะคำขอ
         </button>
@@ -127,7 +127,9 @@
             <span class="material-symbols-rounded">menu</span>
           </button>
           <div class="header-breadcrumb">
-            <span class="material-symbols-rounded" style="font-size:18px; color:rgba(255,255,255,0.7)">home</span>
+            <button class="home-breadcrumb-btn" onclick="switchTab('calendar')" title="หน้าหลัก">
+              <span class="material-symbols-rounded" style="font-size:18px;">home</span>
+            </button>
             <span style="color:rgba(255,255,255,0.5)">/</span>
             <span class="bc-current" id="headerPageTitle">ตารางเวร</span>
           </div>
@@ -427,10 +429,10 @@
 
   <!-- ════════════════ Scripts ════════════════ -->
 
-  <script src="firebase-config.js?v=20260214-2"></script>
-  <script src="data.js?v=20260214-2"></script>
-  <script src="scheduler.js?v=20260214-2"></script>
-  <script src="app.js?v=20260214-2"></script>
+  <script src="firebase-config.js?v=20260214-3"></script>
+  <script src="data.js?v=20260214-3"></script>
+  <script src="scheduler.js?v=20260214-3"></script>
+  <script src="app.js?v=20260214-3"></script>
 
   <!-- ════════════════ MODAL: Rejection Reason ════════════════ -->
   <div class="modal-overlay" id="rejectModal">
