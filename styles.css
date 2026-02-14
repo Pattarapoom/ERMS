@@ -1786,6 +1786,24 @@ textarea {
     flex-direction: column;
   }
 
+  /* Keep login modal at top area on mobile to avoid keyboard overlap */
+  #loginModal.modal-overlay {
+    align-items: flex-start;
+    padding: calc(10px + env(safe-area-inset-top)) 8px 8px;
+  }
+
+  #loginModal .modal {
+    width: 100%;
+    max-height: calc(100vh - env(safe-area-inset-top) - 18px);
+    max-height: calc(100dvh - env(safe-area-inset-top) - 18px);
+    border-radius: 16px;
+  }
+
+  #loginModal .modal-footer {
+    position: static;
+    padding: 10px 16px 16px;
+  }
+
   #leaveModal .modal {
     max-height: 96vh;
   }

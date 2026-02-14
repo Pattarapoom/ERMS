@@ -331,6 +331,11 @@ function openLoginOverlay() {
     const passIn = document.getElementById('loginPassword');
     if (userIn) userIn.value = '';
     if (passIn) passIn.value = '';
+
+    // Mobile: bring viewport to top before opening login modal
+    if (window.matchMedia('(max-width: 900px)').matches) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
     openModal('loginModal');
 }
 
