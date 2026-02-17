@@ -484,4 +484,3 @@ const SAMPLE_NURSES = [
 
 // ──────────────────── Admin Password ────────────────────
 const ADMIN_PASSWORD = 'admin1234';
-
