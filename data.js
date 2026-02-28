@@ -85,399 +85,274 @@ const LEAVE_TYPES = {
     training: { label: 'ลาอบรม', color: '#3b82f6', icon: '📚' },
 };
 
-// ──────────────────── Imported Nurses (Manual Fix) ────────────────────
+// ──────────────────── Sample Nurses (Demo Data) ────────────────────
+// ✅ ใช้ข้อมูลสมมติสำหรับ public repository
+// 📝 สำหรับข้อมูลจริง ดูที่ nurses-real.js (ไม่ upload ขึ้น Git)
 const SAMPLE_NURSES = [
     {
         "id": "N001",
-        "name": "พว. จาตุรง พิมโคตร",
+        "name": "Head Nurse A",
         "headCode": 9,
-        "roles": [
-            "Head",
-            "Med"
-        ],
+        "roles": ["Head", "Med"],
         "level": 3
     },
     {
         "id": "N002",
-        "name": "พว. อารียา บุญพระ",
+        "name": "Head Nurse B",
         "headCode": 9,
-        "roles": [
-            "Head",
-            "Med"
-        ],
+        "roles": ["Head", "Med"],
         "level": 3
     },
     {
         "id": "N003",
-        "name": "พว. พีรยา บัวขาว",
+        "name": "Head Nurse C",
         "headCode": 9,
-        "roles": [
-            "Head",
-            "Med"
-        ],
+        "roles": ["Head", "Med"],
         "level": 3
     },
     {
         "id": "N004",
-        "name": "พว. สุจิตรา ลำมะนา",
+        "name": "Head Nurse D",
         "headCode": 9,
-        "roles": [
-            "Head",
-            "Med"
-        ],
+        "roles": ["Head", "Med"],
         "level": 3
     },
     {
         "id": "N005",
-        "name": "พว. ผกาวรรณ ไชยธรรม",
+        "name": "Incharge Nurse 1",
         "headCode": 5,
-        "roles": [
-            "Incharge1",
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge1", "Incharge_team", "Med"],
         "level": 3
     },
     {
         "id": "N006",
-        "name": "พว. ณัฐธิชา หาญเชิงชัย",
+        "name": "Incharge Nurse 2",
         "headCode": 5,
-        "roles": [
-            "Incharge1",
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge1", "Incharge_team", "Med"],
         "level": 3
     },
     {
         "id": "N007",
-        "name": "พว. มัฌติกา ทองแก้ว",
+        "name": "Incharge Nurse 3",
         "headCode": 5,
-        "roles": [
-            "Incharge1",
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge1", "Incharge_team", "Med"],
         "level": 3
     },
     {
         "id": "N008",
-        "name": "พว. อมรรัตน์ จันทคาม",
+        "name": "Incharge Nurse 4",
         "headCode": 5,
-        "roles": [
-            "Incharge1",
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge1", "Incharge_team", "Med"],
         "level": 3
     },
     {
         "id": "N009",
-        "name": "พว. วรรณทิวา เผ่ามณี",
+        "name": "Team Lead 1",
         "headCode": 5,
-        "roles": [
-            "Incharge1",
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge1", "Incharge_team", "Med"],
         "level": 3
     },
     {
         "id": "N010",
-        "name": "พว. ช่อลัดดา ชำนาญพล",
+        "name": "Senior Nurse 1",
         "headCode": 5,
-        "roles": [
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge_team", "Med"],
         "level": 2
     },
     {
         "id": "N011",
-        "name": "พว. ศิริลักษณ์ เพ็งอินทร์",
+        "name": "Senior Nurse 2",
         "headCode": 5,
-        "roles": [
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge_team", "Med"],
         "level": 2
     },
     {
         "id": "N012",
-        "name": "พว. ทัศณีย์ แซ่เจีย",
+        "name": "Senior Nurse 3",
         "headCode": 5,
-        "roles": [
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge_team", "Med"],
         "level": 2
     },
     {
         "id": "N013",
-        "name": "พว. สุดารัตน์ สร้อยสังวาลย์",
+        "name": "Senior Nurse 4",
         "headCode": 5,
-        "roles": [
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge_team", "Med"],
         "level": 2
     },
     {
         "id": "N014",
-        "name": "พว. ภัทรนิษฐ์ อ่างนิลพันธ์",
+        "name": "Senior Nurse 5",
         "headCode": 5,
-        "roles": [
-            "Incharge_team",
-            "Med"
-        ],
+        "roles": ["Incharge_team", "Med"],
         "level": 2
     },
     {
         "id": "N015",
-        "name": "พว. วรรณพร ฬานันท์",
+        "name": "Fast Track Specialist 1",
         "headCode": 5,
-        "roles": [
-            "Fast_track",
-            "Triage",
-            "Med"
-        ],
+        "roles": ["Fast_track", "Triage", "Med"],
         "level": 2
     },
     {
         "id": "N016",
-        "name": "พว. เพ็ญพิชชา เจียมจรรยา",
+        "name": "Fast Track Specialist 2",
         "headCode": 5,
-        "roles": [
-            "Fast_track",
-            "Triage",
-            "Med"
-        ],
+        "roles": ["Fast_track", "Triage", "Med"],
         "level": 2
     },
     {
         "id": "N017",
-        "name": "พว. เจนจิรา เจริญแพทย์",
+        "name": "Triage Nurse 1",
         "headCode": 5,
-        "roles": [
-            "Fast_track",
-            "Triage",
-            "Med"
-        ],
+        "roles": ["Fast_track", "Triage", "Med"],
         "level": 2
     },
     {
         "id": "N018",
-        "name": "พว. พรธิดี บัวคำ",
+        "name": "Triage Nurse 2",
         "headCode": 5,
-        "roles": [
-            "Fast_track",
-            "Triage",
-            "Med"
-        ],
+        "roles": ["Fast_track", "Triage", "Med"],
         "level": 2
     },
     {
         "id": "N019",
-        "name": "พว. ภัคคีมา ทรัพย์เมือง",
+        "name": "Procedure Nurse 1",
         "headCode": 5,
-        "roles": [
-            "Inc_proc",
-            "Med_proc",
-            "Screen_6_8",
-            "Med"
-        ],
+        "roles": ["Inc_proc", "Med_proc", "Screen_6_8", "Med"],
         "level": 2
     },
     {
         "id": "N020",
-        "name": "พว. ธันย์ชนก อัศวโสวรรณ",
+        "name": "Procedure Nurse 2",
         "headCode": 5,
-        "roles": [
-            "Inc_proc",
-            "Med_proc",
-            "Screen_6_8",
-            "Med"
-        ],
+        "roles": ["Inc_proc", "Med_proc", "Screen_6_8", "Med"],
         "level": 2
     },
     {
         "id": "N021",
-        "name": "พว. ณัฎฐธิดา น้อยศรี",
+        "name": "Procedure Nurse 3",
         "headCode": 5,
-        "roles": [
-            "Inc_proc",
-            "Med_proc",
-            "Screen_6_8",
-            "Med"
-        ],
+        "roles": ["Inc_proc", "Med_proc", "Screen_6_8", "Med"],
         "level": 2
     },
     {
         "id": "N022",
-        "name": "พว. ธงชัย เกษลา",
+        "name": "Screening Center 1",
         "headCode": 5,
-        "roles": [
-            "Screen_center",
-            "Med"
-        ],
+        "roles": ["Screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N023",
-        "name": "พว. ชัยภัทร บุญตันกัน",
+        "name": "Screening Center 2",
         "headCode": 5,
-        "roles": [
-            "Screen_center",
-            "Med"
-        ],
+        "roles": ["Screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N024",
-        "name": "พว. กชกร เยือกเย็น",
+        "name": "Screening Center 3",
         "headCode": 5,
-        "roles": [
-            "Screen_center",
-            "Med"
-        ],
+        "roles": ["Screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N025",
-        "name": "พว. กัณฑิยา แซ่เล้า",
+        "name": "Screening Center 4",
         "headCode": 5,
-        "roles": [
-            "Screen_center",
-            "Med"
-        ],
+        "roles": ["Screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N026",
-        "name": "พว. ศาธิตา บุตรสุด",
+        "name": "Screening Center 5",
         "headCode": 5,
-        "roles": [
-            "Screen_center",
-            "Med"
-        ],
+        "roles": ["Screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N027",
-        "name": "พว. ลักษิกา ชูรีรักษ์",
+        "name": "Afternoon Specialist 1",
         "headCode": 5,
-        "roles": [
-            "Proc_16_20",
-            "Screen_16_20",
-            "Med"
-        ],
+        "roles": ["Proc_16_20", "Screen_16_20", "Med"],
         "level": 1
     },
     {
         "id": "N028",
-        "name": "พว. ประภัสสร ธัญญานนท์",
+        "name": "Afternoon Specialist 2",
         "headCode": 5,
-        "roles": [
-            "Proc_16_20",
-            "Screen_16_20",
-            "Med"
-        ],
+        "roles": ["Proc_16_20", "Screen_16_20", "Med"],
         "level": 1
     },
     {
         "id": "N029",
-        "name": "พว. ภัคจิรา อังคณานันท์",
+        "name": "Afternoon Specialist 3",
         "headCode": 5,
-        "roles": [
-            "Proc_16_20",
-            "Screen_16_20",
-            "Med"
-        ],
+        "roles": ["Proc_16_20", "Screen_16_20", "Med"],
         "level": 1
     },
     {
         "id": "N030",
-        "name": "พว. ลักษมณ ป้องบุญจันทร์",
+        "name": "Afternoon Specialist 4",
         "headCode": 5,
-        "roles": [
-            "Proc_16_20",
-            "Screen_16_20",
-            "Med"
-        ],
+        "roles": ["Proc_16_20", "Screen_16_20", "Med"],
         "level": 1
     },
     {
         "id": "N031",
-        "name": "พว. ณัฐนพิน บุญประสพ",
+        "name": "Medical Nurse 1",
         "headCode": 5,
-        "roles": [
-            "Med"
-        ],
+        "roles": ["Med"],
         "level": 1
     },
     {
         "id": "N032",
-        "name": "พว. โปษิณ ท่าทราย",
+        "name": "Medical Nurse 2",
         "headCode": 5,
-        "roles": [
-            "Med"
-        ],
+        "roles": ["Med"],
         "level": 1
     },
     {
         "id": "N033",
-        "name": "พว. ธีระศักดิ์ อินตู",
+        "name": "Medical Nurse 3",
         "headCode": 5,
-        "roles": [
-            "Med"
-        ],
+        "roles": ["Med"],
         "level": 1
     },
     {
         "id": "N034",
-        "name": "พว. กัลติษา บุญมณี",
+        "name": "Medical Nurse 4",
         "headCode": 5,
-        "roles": [
-            "Med"
-        ],
+        "roles": ["Med"],
         "level": 1
     },
     {
         "id": "N035",
-        "name": "พว. พิชญานิน เดชบุญญาภิชาติ",
+        "name": "Medical Nurse 5",
         "headCode": 5,
-        "roles": [
-            "Med"
-        ],
+        "roles": ["Med"],
         "level": 1
     },
     {
         "id": "N036",
-        "name": "พว. ธันย์ชนก อัศวโสวรรณ",
+        "name": "Medical Nurse 6",
         "headCode": 5,
-        "roles": [
-            "Med"
-        ],
+        "roles": ["Med"],
         "level": 1
     },
     {
         "id": "N037",
-        "name": "พว. รัตนาภรณ์ โพธิไพรัตนา",
+        "name": "Medical Nurse 7",
         "headCode": 5,
-        "roles": [
-            "Med"
-        ],
+        "roles": ["Med"],
         "level": 1
     },
     {
         "id": "N038",
-        "name": "Nurse 38",
+        "name": "Multi-Role Nurse",
         "headCode": 5,
-        "roles": [
-            "Med",
-            "Screen_6_8",
-            "Screen_16_20"
-        ],
+        "roles": ["Med", "Screen_6_8", "Screen_16_20"],
         "level": 1
     }
 ];
