@@ -38,6 +38,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadRequests();
     renderMonthLabel();
     renderUserProfile();
+    
+    // Auto-Sync if Global Database is empty but scheduler has nurses (post-restore case)
+    if (activeNurses.length === 0 && scheduler && scheduler.nurses && scheduler.nurses.length > 0) {
+        console.log('[ERMS] Auto-syncing global nurses from scheduler...');
+        activeNurses = JSON.parse(JSON.stringify(scheduler.nurses));
+        saveGlobalSettings();
+    }
+
     renderAll();
     bindEvents();
     if (firebaseReady) {
@@ -562,6 +570,8 @@ function switchTab(tab) {
     // Update sidebar active
     document.getElementById('navCalendar').classList.toggle('active', tab === 'calendar');
     document.getElementById('navStats').classList.toggle('active', tab === 'stats');
+    const navNurseSummary = document.getElementById('navNurseSummary');
+    if (navNurseSummary) navNurseSummary.classList.toggle('active', tab === 'nurseSummary');
     const navSwap = document.getElementById('navSwapHistory');
     if (navSwap) navSwap.classList.toggle('active', tab === 'swapHistory');
     const navRequest = document.getElementById('navRequestStatus');
@@ -574,15 +584,24 @@ function switchTab(tab) {
     // Update views
     document.getElementById('calendarView').classList.toggle('hidden', tab !== 'calendar');
     document.getElementById('statsView').classList.toggle('hidden', tab !== 'stats');
+    const nsView = document.getElementById('nurseSummaryView');
+    if (nsView) nsView.classList.toggle('hidden', tab !== 'nurseSummary');
     document.getElementById('swapHistoryView').classList.toggle('hidden', tab !== 'swapHistory');
     document.getElementById('requestStatusView').classList.toggle('hidden', tab !== 'requestStatus');
     document.getElementById('approvalView').classList.toggle('hidden', tab !== 'approval');
     document.getElementById('settingsView').classList.toggle('hidden', tab !== 'settings');
 
+    // Toggle Toolbar (only show on calendar/stats)
+    const toolbar = document.getElementById('pageToolbar');
+    if (toolbar) {
+        toolbar.classList.toggle('hidden', !['calendar', 'stats'].includes(tab));
+    }
+
     // Update page title
     const pageInfo = {
         calendar: { icon: 'calendar_month', text: 'ตารางเวรพยาบาล' },
         stats: { icon: 'analytics', text: 'สถิติการทำงาน' },
+        nurseSummary: { icon: 'person_search', text: 'สรุปเวรรายบุคคล' },
         swapHistory: { icon: 'history', text: 'ประวัติสลับเวร' },
         requestStatus: { icon: 'fact_check', text: 'สถานะคำขอ' },
         approval: { icon: 'rule_settings', text: 'อนุมัติคำขอ (Admin/Head)' },
@@ -600,6 +619,7 @@ function switchTab(tab) {
 
     // Render content
     if (tab === 'stats' && scheduler && scheduler.locked) renderStats();
+    if (tab === 'nurseSummary') renderNurseSummary();
     if (tab === 'swapHistory') renderSwapHistory();
     if (tab === 'requestStatus') renderRequestStatus();
     if (tab === 'approval') renderApprovalView();
@@ -646,6 +666,121 @@ function clearSchedule() {
     scheduler = null;
     renderAll();
     showToast('success', 'ล้างตารางเวรเรียบร้อยแล้ว');
+}
+
+async function copyScheduleFromPreviousMonth() {
+    if (!isAdmin) {
+        showToast('error', 'เฉพาะหัวหน้าเวรเท่านั้นที่สามารถคัดลอกตารางได้');
+        return;
+    }
+
+    const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+    const prevLabel = `${THAI_MONTHS[prevMonth]} ${prevYear + 543}`;
+
+    if (!confirm(`คัดลอกตารางเวรจากเดือน ${prevLabel} มาเดือนนี้ใช่หรือไม่?\nระบบจะคัดลอกเฉพาะตารางเวร (ไม่รวมลา/สลับเวร)`)) {
+        return;
+    }
+
+    if (firebaseReady) {
+        await syncMonthFromFirebase(prevYear, prevMonth);
+    }
+
+    const prevRaw = localStorage.getItem(getStorageKey(prevYear, prevMonth));
+    if (!prevRaw) {
+        showToast('warning', `ไม่พบข้อมูลเดือน ${prevLabel} ให้คัดลอก`);
+        return;
+    }
+
+    let prevData;
+    try {
+        prevData = JSON.parse(prevRaw);
+    } catch (err) {
+        showToast('error', 'ข้อมูลเดือนก่อนหน้าเสียหาย ไม่สามารถคัดลอกได้');
+        return;
+    }
+
+    if (!prevData || typeof prevData.schedule !== 'object') {
+        showToast('warning', `ข้อมูลเดือน ${prevLabel} ยังไม่มีตารางเวร`);
+        return;
+    }
+
+    scheduler = new NurseScheduler(activeNurses, currentMonth, currentYear);
+
+    const nurseMap = new Map(activeNurses.map(n => [n.id, n]));
+    const pad = (n) => String(n).padStart(2, '0');
+    const prevPrefix = `${prevYear}-${pad(prevMonth + 1)}-`;
+
+    let copiedDays = 0;
+    let copiedAssignments = 0;
+    let skippedUnknownNurse = 0;
+
+    for (let day = 1; day <= scheduler.daysInMonth; day++) {
+        const currDateStr = scheduler.dateStr(day);
+        const prevDateStr = `${prevPrefix}${pad(day)}`;
+        const prevDay = prevData.schedule[prevDateStr];
+
+        scheduler.schedule[currDateStr] = { M: [], A: [], N: [] };
+        if (!prevDay) continue;
+
+        let hasCopiedThisDay = false;
+        for (const shift of ['M', 'A', 'N']) {
+            const srcAssignments = Array.isArray(prevDay[shift]) ? prevDay[shift] : [];
+            srcAssignments.forEach(a => {
+                if (!a || (a.nurseId == null && !a.isShortage)) return;
+
+                if (a.isShortage) {
+                    scheduler.schedule[currDateStr][shift].push({
+                        nurseId: null,
+                        nurseName: '(ขาดคน)',
+                        role: a.role || 'Med',
+                        roleLabel: ROLE_LABELS[a.role] || a.role || ROLE_LABELS['Med'] || 'Med',
+                        isLeave: false,
+                        isShortage: true
+                    });
+                    hasCopiedThisDay = true;
+                    copiedAssignments++;
+                    return;
+                }
+
+                const nurse = nurseMap.get(a.nurseId);
+                if (!nurse) {
+                    skippedUnknownNurse++;
+                    return;
+                }
+
+                const role = a.role || 'Med';
+                scheduler.schedule[currDateStr][shift].push({
+                    nurseId: nurse.id,
+                    nurseName: nurse.name,
+                    role,
+                    roleLabel: ROLE_LABELS[role] || role,
+                    isLeave: false,
+                    isShortage: !!a.isShortage
+                });
+                hasCopiedThisDay = true;
+                copiedAssignments++;
+            });
+        }
+
+        if (hasCopiedThisDay) copiedDays++;
+    }
+
+    scheduler.leaves = {};
+    scheduler.swaps = [];
+    scheduler.locked = true;
+    scheduler.rebuildCounters();
+
+    saveToStorage();
+    renderAll();
+
+    if (copiedAssignments === 0) {
+        showToast('warning', `ไม่พบเวรที่คัดลอกได้จากเดือน ${prevLabel}`);
+        return;
+    }
+
+    const skipMsg = skippedUnknownNurse > 0 ? ` (ข้าม ${skippedUnknownNurse} รายการ: ไม่พบรหัสพยาบาล)` : '';
+    showToast('success', `คัดลอกเวรแล้ว ${copiedDays} วัน / ${copiedAssignments} รายการ${skipMsg}`);
 }
 
 // ──────────────── Main Render ────────────────
@@ -724,6 +859,12 @@ function renderStatus() {
         if (btnRegen) btnRegen.classList.add('hidden');
         if (btnDel) btnDel.classList.add('hidden');
     }
+
+    // Firebase Status Badge
+    const fbStatus = firebaseReady ? 
+        `<span class="status-badge" style="background:#e8f5e9; color:#2e7d32; border:1px solid #c8e6c9"><span class="material-symbols-rounded" style="font-size:16px">cloud_done</span> Cloud Sync</span>` :
+        `<span class="status-badge" style="background:#ffebee; color:#c62828; border:1px solid #ffcdd2"><span class="material-symbols-rounded" style="font-size:16px">cloud_off</span> Local Only</span>`;
+    statusEl.innerHTML += fbStatus;
 }
 
 function renderEmptyState() {
@@ -805,8 +946,9 @@ function renderCalendar() {
             html += `<div class="leave-box mini">
                 <div class="leave-list mini">`;
             dayLeaves.forEach(l => {
-                const cls = l.urgent ? 'leave-urgent' : 'leave-normal';
-                html += `<span class="leave-tag mini ${cls}" title="ลา: ${escAttr(l.nurseName)}">${escHtml(l.nurseName.split(' ')[0])}</span>`;
+                const cls = (l.urgent ? 'leave-urgent' : 'leave-normal') + (isAdmin || l.nurseId === currentUser ? ' clickable' : '');
+                const onclick = (isAdmin || l.nurseId === currentUser) ? `onclick="removeLeaveManually('${l.nurseId}', '${ds}')"` : '';
+                html += `<span class="leave-tag mini ${cls}" title="ลา: ${escAttr(l.nurseName)}" ${onclick}>${escHtml(l.nurseName.split(' ')[0])}</span>`;
             });
             html += `</div></div>`;
         }
@@ -1282,6 +1424,214 @@ function renderStats() {
     container.innerHTML = html;
 }
 
+// ──────────────── Nurse Summary (Individual Detailed View) ────────────────
+function renderNurseSummary(targetNurseId = null) {
+    const container = document.getElementById('nurseSummaryContent');
+    if (!container) return;
+
+    if (!currentUser) {
+        container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">กรุณาเข้าสู่ระบบเพื่อดูสรุปเวร</div>';
+        return;
+    }
+
+    if (!scheduler || !scheduler.locked) {
+        container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">ยังไม่มีข้อมูลตารางเวรในเดือนนี้</div>';
+        return;
+    }
+
+    // Determine which nurse to show
+    let nurseId = targetNurseId;
+    if (!nurseId) {
+        nurseId = isAdmin ? 'admin_select' : currentUser;
+    }
+
+    let html = `
+    <div style="max-width:900px; margin:0 auto; padding:20px;">
+        <div class="summary-header-box" style="background:white; padding:24px; border-radius:16px; border:1px solid var(--border-light); box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                <div>
+                    <h2 style="margin:0; font-size:20px; color:var(--primary-dark)">สรุปงานรายเดือน</h2>
+                    <p style="margin:4px 0 0; font-size:14px; color:var(--text-muted)">ตรวจสอบรายละเอียดเวรและประวัติการสลับเพื่อเช็คยอดรายได้</p>
+                </div>
+                ${isAdmin ? `
+                <div class="form-group" style="margin:0; min-width:240px;">
+                    <label style="font-size:12px; font-weight:700; color:var(--text-secondary); margin-bottom:4px; display:block;">เลือกพยาบาลที่ต้องการดู</label>
+                    <select class="form-control" onchange="renderNurseSummary(this.value)" style="border-radius:10px; border:1px solid var(--primary-light); background:var(--primary-light); color:var(--primary-dark); font-weight:600;">
+                        <option value="">-- เลือกรายชื่อ --</option>
+                        ${activeNurses.map(n => `<option value="${n.id}" ${nurseId === n.id ? 'selected' : ''}>${n.id}: ${n.name}</option>`).join('')}
+                    </select>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    if (nurseId === 'admin_select') {
+        html += `
+            <div style="text-align:center; padding:60px; background:var(--gray-50); border-radius:16px; border:2px dashed var(--gray-200);">
+                <span class="material-symbols-rounded" style="font-size:48px; color:var(--gray-300);">person_search</span>
+                <p style="margin-top:16px; color:var(--text-secondary); font-weight:600;">กรุณาเลือกรายชื่อพยาบาลจากเมนูเพื่อดูข้อมูล</p>
+            </div>
+        </div>`;
+        container.innerHTML = html;
+        return;
+    }
+
+    const nurse = activeNurses.find(n => n.id === nurseId);
+    if (!nurse) {
+        container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">ไม่พบข้อมูลพยาบาล ${nurseId}</div>`;
+        return;
+    }
+
+    // Get shifts and swaps for this nurse
+    const shifts = []; // { dateStr, shift, role, status, note }
+    
+    // 1. Current Assignments
+    for (let day = 1; day <= scheduler.daysInMonth; day++) {
+        const ds = scheduler.dateStr(day);
+        const daySchedule = scheduler.schedule[ds];
+        if (!daySchedule) continue;
+
+        for (const s of ['M', 'A', 'N']) {
+            const assignment = daySchedule[s].find(a => a.nurseId === nurseId);
+            if (assignment) {
+                let status = 'ปกติ';
+                let note = '';
+                if (assignment.isLeave) {
+                    status = 'แจ้งลา';
+                    note = `${assignment.leaveType === 'sick' ? 'ลาป่วย' : assignment.leaveType === 'personal' ? 'ลากิจ' : assignment.leaveType === 'vacation' ? 'ลาพักผ่อน' : 'ลาอบรม'}${assignment.urgent ? ' (ฉุกเฉิน)' : ''}`;
+                } else if (assignment.swappedFrom) {
+                    const original = activeNurses.find(n => n.id === assignment.swappedFrom);
+                    status = 'ขึ้นแทน';
+                    note = `รับสลับจาก ${original ? original.name : assignment.swappedFrom}`;
+                }
+                
+                shifts.push({ 
+                    day, 
+                    dateStr: ds, 
+                    shift: s, 
+                    role: assignment.role, 
+                    roleLabel: assignment.roleLabel || ROLE_LABELS[assignment.role] || assignment.role,
+                    status, 
+                    note,
+                    type: 'work' 
+                });
+            }
+        }
+    }
+
+    // 2. Swapped Out
+    scheduler.swaps.forEach(swap => {
+        if (swap.originalNurseId === nurseId) {
+            const day = parseInt(swap.date.split('-')[2]);
+            shifts.push({
+                day,
+                dateStr: swap.date,
+                shift: swap.shift,
+                role: swap.role,
+                roleLabel: ROLE_LABELS[swap.role] || swap.role,
+                status: 'สลับออก',
+                note: `สลับให้ ${swap.replacementNurseName}`,
+                type: 'swap-out'
+            });
+        }
+    });
+
+    // Sort by day then shift (M < A < N)
+    const shiftOrder = { M: 1, A: 2, N: 3 };
+    shifts.sort((a, b) => {
+        if (a.day !== b.day) return a.day - b.day;
+        return shiftOrder[a.shift] - shiftOrder[b.shift];
+    });
+
+    // Totals for payroll check
+    const totals = { M: 0, A: 0, N: 0, total: 0 };
+    shifts.forEach(s => {
+        if (s.type === 'work' && s.status !== 'แจ้งลา') {
+            totals[s.shift]++;
+            totals.total++;
+        }
+    });
+
+    html += `
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px; margin-bottom:24px;">
+            <div class="summary-mini-card" style="background:#f0f9ff; padding:16px; border-radius:12px; border:1px solid #bae6fd;">
+                <div style="font-size:12px; color:#0369a1; font-weight:700; text-transform:uppercase;">กะเช้า (M)</div>
+                <div style="font-size:24px; font-weight:800; color:#0c4a6e;">${totals.M} <small style="font-size:12px; font-weight:400">เวร</small></div>
+            </div>
+            <div class="summary-mini-card" style="background:#fff7ed; padding:16px; border-radius:12px; border:1px solid #ffedd5;">
+                <div style="font-size:12px; color:#c2410c; font-weight:700; text-transform:uppercase;">กะบ่าย (A)</div>
+                <div style="font-size:24px; font-weight:800; color:#7c2d12;">${totals.A} <small style="font-size:12px; font-weight:400">เวร</small></div>
+            </div>
+            <div class="summary-mini-card" style="background:#f5f3ff; padding:16px; border-radius:12px; border:1px solid #ddd6fe;">
+                <div style="font-size:12px; color:#6d28d9; font-weight:700; text-transform:uppercase;">กะดึก (N)</div>
+                <div style="font-size:24px; font-weight:800; color:#4c1d95;">${totals.N} <small style="font-size:12px; font-weight:400">เวร</small></div>
+            </div>
+            <div class="summary-mini-card" style="background:var(--primary-light); padding:16px; border-radius:12px; border:1px solid var(--primary-border);">
+                <div style="font-size:12px; color:var(--primary-dark); font-weight:700; text-transform:uppercase;">รวมปฏิบัติงานจริง</div>
+                <div style="font-size:24px; font-weight:800; color:var(--primary-dark);">${totals.total} <small style="font-size:12px; font-weight:400">เวร</small></div>
+            </div>
+        </div>
+
+        <div class="stats-container" style="background:white; border-radius:16px; overflow:hidden; border:1px solid var(--border-light); box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+            <div style="padding:16px 20px; border-bottom:1px solid var(--border-light); font-weight:800; color:var(--text-secondary); display:flex; align-items:center; gap:8px;">
+                <span class="material-symbols-rounded">list</span> รายละเอียดเวรรายวัน / ยอดรายชื่อ
+            </div>
+            <table class="stats-table">
+                <thead>
+                    <tr>
+                        <th style="width:100px">วันที่</th>
+                        <th style="width:80px; text-align:center">กะ</th>
+                        <th style="width:140px">ตำแหน่ง</th>
+                        <th style="width:100px; text-align:center">สถานะ</th>
+                        <th>หมายเหตุ / รายละเอียดการสลับ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${shifts.map(s => {
+                        let statusColor = 'var(--text-primary)';
+                        let bg = 'white';
+                        if (s.status === 'แจ้งลา') { statusColor = 'var(--error)'; bg = '#fff1f2'; }
+                        else if (s.status === 'ขึ้นแทน') { statusColor = 'var(--success)'; bg = '#f0fdf4'; }
+                        else if (s.status === 'สลับออก') { statusColor = 'var(--text-muted)'; bg = '#f8fafc'; }
+
+                        const dayName = DAY_NAMES_SHORT[new Date(scheduler.year, scheduler.month, s.day).getDay()];
+
+                        return `
+                            <tr style="background:${bg}">
+                                <td style="font-weight:700">${s.day} ${THAI_MONTHS[currentMonth].substring(0,3)} (${dayName})</td>
+                                <td style="text-align:center">
+                                    <span class="shift-count" style="background:var(--shift-${s.shift.toLowerCase()}-badge)">${s.shift}</span>
+                                </td>
+                                <td>${s.roleLabel}</td>
+                                <td style="text-align:center">
+                                    <span style="font-size:12px; font-weight:800; color:${statusColor}">${s.status}</span>
+                                </td>
+                                <td style="font-size:12px; color:var(--text-secondary)">${s.note || '-'}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                    ${shifts.length === 0 ? '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted)">ไม่มีรายการเวรในเดือนนี้</td></tr>' : ''}
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="margin-top:20px; padding:16px; background:#fef3c7; border-radius:12px; border:1px solid #fde68a; color:#92400e; font-size:13px; display:flex; gap:12px; align-items:flex-start;">
+            <span class="material-symbols-rounded">info</span>
+            <div>
+                <b>หมายเหตุสำหรับการตรวจสอบรายได้:</b>
+                <ul style="margin:4px 0 0 20px; padding:0">
+                    <li><b>สถานะปกติ/ขึ้นแทน:</b> นับเป็นเวรปฏิบัติงานจริง นำไปรวมยอดเงินได้</li>
+                    <li><b>สถานะแจ้งลา/สลับออก:</b> ไม่นับเป็นเวรปฏิบัติงานในยอดสรุปนี้</li>
+                    <li>หากข้อมูลไม่ถูกต้อง กรุณาติดต่อหัวหน้าเวรเพื่อตรวจสอบประวัติการอนุมัติในระบบ</li>
+                </ul>
+            </div>
+        </div>
+    </div>`;
+
+    container.innerHTML = html;
+}
+
 // ──────────────── Swap History ────────────────
 function showSwapHistory() {
     switchTab('swapHistory');
@@ -1486,14 +1836,17 @@ function openLeaveModal() {
         return;
     }
 
-    if (!scheduler || !scheduler.locked) {
+    // Admins can add leaves even before schedule is locked/generated
+    if (!isAdmin && (!scheduler || !scheduler.locked)) {
         showToast('warning', 'กรุณาสร้างตารางเวรก่อน');
         return;
     }
 
     const sel = document.getElementById('leaveNurse');
     sel.innerHTML = '<option value="">-- เลือกพยาบาล --</option>';
-    scheduler.nurses.forEach(n => {
+    
+    // Always use activeNurses instead of scheduler.nurses to ensure everyone is available
+    activeNurses.forEach(n => {
         sel.innerHTML += `<option value="${n.id}">${n.name}</option>`;
     });
 
@@ -1562,7 +1915,7 @@ function submitLeave() {
         const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
             const ds = fmt(d);
-            if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+            if (scheduler && d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
                 if (scheduler.addLeave(nurseId, ds, leaveType, urgent, reason)) count++;
             } else {
                 if (saveCrossMonthLeave(ds, nurseId, leaveType, urgent, reason)) count++;
@@ -1608,7 +1961,7 @@ function saveCrossMonthLeave(dateStr, nurseId, leaveType, urgent, reason) {
     // Init data if missing (New Month)
     if (!data) {
         data = {
-            nurses: scheduler ? scheduler.nurses : [],
+            nurses: activeNurses,
             schedule: {},
             leaves: {}
         };
@@ -1618,20 +1971,59 @@ function saveCrossMonthLeave(dateStr, nurseId, leaveType, urgent, reason) {
     if (!data.leaves[dateStr]) data.leaves[dateStr] = [];
 
     // Check duplicate
-    if (data.leaves[dateStr].some(l => l.nurseId === nurseId)) return false;
+    if (!data.leaves[dateStr].some(l => l.nurseId === nurseId)) {
+        const nurse = activeNurses.find(n => n.id === nurseId);
+        data.leaves[dateStr].push({
+            nurseId,
+            nurseName: nurse ? nurse.name : nurseId,
+            leaveType,
+            urgent,
+            reason
+        });
 
-    const nurse = scheduler.nurses.find(n => n.id === nurseId);
-    data.leaves[dateStr].push({
-        nurseId,
-        nurseName: nurse ? nurse.name : nurseId,
-        leaveType,
-        urgent,
-        reason
-    });
+        localStorage.setItem(key, JSON.stringify(data));
+        void firebaseSet(getFirebaseSchedulePath(year, monthIndex), data);
+        return true;
+    }
+    return false;
+}
 
-    localStorage.setItem(key, JSON.stringify(data));
-    void firebaseSet(getFirebaseSchedulePath(year, monthIndex), data);
-    return true;
+function removeLeaveManually(nurseId, dateStr) {
+    if (!isAdmin && nurseId !== currentUser) {
+        showToast('error', 'คุณไม่มีสิทธิ์ลบข้อมูลนี้');
+        return;
+    }
+
+    if (!confirm('ต้องการลบข้อมูลการลานี้ใช่หรือไม่?')) return;
+
+    const parts = dateStr.split('-').map(Number);
+    const year = parts[0];
+    const monthIndex = parts[1] - 1;
+
+    // Handle current instance if it matches
+    if (scheduler && year === currentYear && monthIndex === currentMonth) {
+        scheduler.removeLeave(nurseId, dateStr);
+        saveToStorage();
+    } else {
+        // Handle external storage
+        const key = `erms_${year}_${monthIndex}`;
+        let dataStr = localStorage.getItem(key);
+        if (dataStr) {
+            try {
+                let data = JSON.parse(dataStr);
+                if (data.leaves && data.leaves[dateStr]) {
+                    data.leaves[dateStr] = data.leaves[dateStr].filter(l => l.nurseId !== nurseId);
+                    localStorage.setItem(key, JSON.stringify(data));
+                    void firebaseSet(getFirebaseSchedulePath(year, monthIndex), data);
+                }
+            } catch (e) {
+                console.error('Failed to parse storage for leave removal', e);
+            }
+        }
+    }
+
+    renderAll();
+    showToast('success', 'ลบข้อมูลการลาเรียบร้อยแล้ว');
 }
 
 // ──────────────── Swap System ────────────────
@@ -1819,16 +2211,23 @@ function restoreData(input) {
     reader.onload = (e) => {
         try {
             const json = JSON.parse(e.target.result);
-            if (!json.schedule || !json.nurses) {
+            if (!json.schedule || (!json.nurses && !json.activeNurses)) {
                 showToast('error', 'ไฟล์ไม่ถูกต้อง (Missing schedule/nurses)');
                 return;
             }
 
-            scheduler = new NurseScheduler(json.nurses, currentMonth, currentYear);
+            // Also restore global nurse list if found
+            const backupNurses = json.nurses || json.activeNurses;
+            if (backupNurses && Array.isArray(backupNurses)) {
+                activeNurses = JSON.parse(JSON.stringify(backupNurses));
+                saveGlobalSettings();
+            }
+
+            scheduler = new NurseScheduler(activeNurses, currentMonth, currentYear);
             scheduler.loadFromJSON(json);
             saveToStorage();
             renderAll();
-            showToast('success', 'Restore ข้อมูลสำเร็จ!');
+            showToast('success', 'Restore ข้อมูลสำเร็จ และซิงค์ขึ้น Cloud เรียบร้อย!');
         } catch (err) {
             console.error(err);
             showToast('error', 'ไฟล์ไม่ถูกต้อง (Invalid JSON)');
@@ -1943,28 +2342,89 @@ function renderNurseList() {
     const container = document.getElementById('nurseLayout');
     if (!container) return;
 
-    container.innerHTML = activeNurses.map(n => `
-        <div class="nurse-card">
-            <div class="nurse-info">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <h4 style="margin:0">${escHtml(n.name)}</h4>
-                    ${n.isAdmin ? '<span class="badge" style="background:var(--primary-dark); color:white; font-size:9px;">ADMIN</span>' : ''}
+    // Log for debugging (User can report if still failing)
+    console.log('[ERMS] Rendering Nurse List. Active Count:', activeNurses.length);
+
+    if (!activeNurses || activeNurses.length === 0) {
+        if (scheduler && scheduler.nurses && scheduler.nurses.length > 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1; padding: 40px; border: 2px dashed var(--primary-light); text-align:center;">
+                    <span class="material-symbols-rounded" style="font-size:48px; color:var(--primary)">group_add</span>
+                    <h3 style="margin-top:12px">ฐานข้อมูลหลักว่างเปล่า</h3>
+                    <p style="color:var(--text-muted); margin-bottom:16px">พบรายชื่อพยาบาล ${scheduler.nurses.length} คนในตารางเวรคุณต้องการนำเข้าหรือไม่?</p>
+                    <button class="btn btn-primary" onclick="importNursesFromScheduler()">
+                        นำเข้ารายชื่อทั้งหมด (${scheduler.nurses.length} คน)
+                    </button>
                 </div>
-                <p>ID: ${n.id} · Level: ${n.level} · HeadCode: ${n.headCode}</p>
-                <div style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap;">
-                    ${n.roles.map(r => `<span class="badge" style="font-size:10px">${activeRoleLabels[r] || r}</span>`).join('')}
+            `;
+        } else {
+            container.innerHTML = `<div class="empty-state" style="grid-column:1/-1; padding:40px; text-align:center;">ไม่พบรายชื่อพยาบาล กรุณาเพิ่มรายชื่อ</div>`;
+        }
+        return;
+    }
+
+    container.innerHTML = activeNurses.map(n => {
+        // Defensive checks to prevent crash
+        if (!n) return '';
+        const roles = Array.isArray(n.roles) ? n.roles : [];
+        const rolesHtml = roles.map(r => {
+            const role = (activeRoleLabels && activeRoleLabels[r]) ? activeRoleLabels[r] : r;
+            let shortLabel = role;
+            if (r === 'Incharge1') shortLabel = 'IC1';
+            else if (r === 'Incharge_team') shortLabel = 'ICT';
+            else if (r === 'Fast_track') shortLabel = 'FT';
+            else if (r === 'Triage') shortLabel = 'TR';
+            else if (r === 'Screen_center') shortLabel = 'SC';
+            return `<span class="badge" style="font-size:10px; background:var(--bg-body); color:var(--text-secondary); border:1px solid var(--border-medium)">${shortLabel}</span>`;
+        }).join('');
+
+        const headCodeLabel = {
+            '5': 'ทุกเวร',
+            '7': 'ห้ามดึก/เวรบ่าย(จ-ศ)',
+            '8': 'เช้าเท่านั้น/IC(ส-อา)',
+            '9': 'เช้าเท่านั้น'
+        }[n.headCode] || 'ปกติ';
+
+        return `
+            <div class="nurse-card">
+                <div class="nurse-info">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <h4 style="margin:0; font-size:16px;">${escHtml(n.name || 'ไม่มีชื่อ')}</h4>
+                        ${n.isAdmin ? '<span class="badge" style="background:#4338ca; color:white; font-size:9px;">ADMIN</span>' : ''}
+                    </div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                        ID: <span style="color:var(--text-primary); font-weight:600">${n.id || '-'}</span> · 
+                        HC: <span style="color:var(--primary-dark); font-weight:600">${n.headCode || '5'}</span>
+                    </div>
+                    <div style="margin-top:10px; display:flex; gap:4px; flex-wrap:wrap;">
+                        ${rolesHtml}
+                    </div>
+                </div>
+                <div class="nurse-actions">
+                    <button class="mini-btn" onclick="openEditNurseModal('${n.id}')">
+                        <span class="material-symbols-rounded" style="font-size:20px">edit</span>
+                    </button>
+                    <button class="mini-btn" onclick="deleteNurse('${n.id}')" style="color:var(--error)">
+                        <span class="material-symbols-rounded" style="font-size:20px">delete</span>
+                    </button>
                 </div>
             </div>
-            <div class="nurse-actions">
-                <button class="mini-btn" onclick="openEditNurseModal('${n.id}')" title="แก้ไข">
-                    <span class="material-symbols-rounded" style="font-size:18px">edit</span>
-                </button>
-                <button class="mini-btn" onclick="deleteNurse('${n.id}')" title="ลบ" style="color:var(--error)">
-                    <span class="material-symbols-rounded" style="font-size:18px">delete</span>
-                </button>
-            </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
+}
+
+function importNursesFromScheduler() {
+    if (!scheduler || !scheduler.nurses || scheduler.nurses.length === 0) {
+        showToast('error', 'ไม่มีข้อมูลรายชื่อในตารางเวรปัจจุบัน');
+        return;
+    }
+
+    if (!confirm(`ต้องการนำเข้ารายชื่อทั้งหมด ${scheduler.nurses.length} คน เข้าสู่ฐานข้อมูลหลักใช่หรือไม่?`)) return;
+
+    activeNurses = JSON.parse(JSON.stringify(scheduler.nurses));
+    saveGlobalSettings();
+    renderAll();
+    showToast('success', 'นำเข้ารายชื่อพยาบาลเรียบร้อยแล้ว');
 }
 
 function openAddNurseModal() {

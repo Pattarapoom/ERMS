@@ -994,6 +994,14 @@ body.is-admin #navRequestStatus {
   border: 1px solid #feb2b2;
   color: #c53030;
   white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.leave-tag.mini.clickable:hover {
+  background: #fff5f5;
+  border-color: #f56565;
+  cursor: pointer;
+  transform: scale(1.05);
 }
 
 .shift-mini-section {
