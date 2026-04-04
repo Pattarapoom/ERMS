@@ -2874,6 +2874,29 @@ function updateLeaveLimit(level, val) {
     showToast('success', `อัปเดตโควต้าลาระดับ ${level} แล้ว`);
 }
 
+function syncNursesRealToFirebase() {
+    if (!firebaseReady || !firebaseDb) {
+        showToast('error', 'ยังไม่เชื่อมต่อ Firebase');
+        return;
+    }
+    if (typeof NURSES_REAL === 'undefined' || !Array.isArray(NURSES_REAL) || NURSES_REAL.length === 0) {
+        showToast('error', 'ไม่พบข้อมูล NURSES_REAL ในไฟล์');
+        return;
+    }
+    const ok = confirm('ยืนยันอัปเดตรายชื่อพยาบาลจากไฟล์ nurses-real.js ไปยัง Firebase?');
+    if (!ok) return;
+
+    activeNurses = normalizeNurses(JSON.parse(JSON.stringify(NURSES_REAL)));
+    saveGlobalSettings();
+
+    if (scheduler) {
+        scheduler.nurses = activeNurses;
+    }
+    renderSettings();
+    renderAll();
+    showToast('success', 'อัปเดตข้อมูลไป Firebase เรียบร้อยแล้ว');
+}
+
 function resetToSourceData() {
     if (!confirm('ยืนยันระบบจะรีเซ็ตรายชื่อพยาบาลและเงื่อนไขทั้งหมดกลับไปใช้ค่าเริ่มต้นจากไฟล์ข้อมูล (ข้อมูลที่แก้ไขไว้จะหายไป)?')) return;
 
