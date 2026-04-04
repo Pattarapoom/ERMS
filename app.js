@@ -2744,7 +2744,7 @@ function saveNurse() {
         return;
     }
     if (!level) {
-        showToast('error', 'กรุณาเลือกระดับ (1-3)');
+        showToast('error', 'กรุณาเลือกระดับ (1-4)');
         return;
     }
 
