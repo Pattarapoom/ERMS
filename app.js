@@ -2982,9 +2982,12 @@ function handleCSVImport(input) {
                         const leaveMap = {
                             'ป': 'sick',
                             'ก': 'personal',
+                            'ผ': 'vacation',
                             'V': 'vacation',
                             'อ': 'training',
-                            'ชP': 'preceptor'
+                            'ชพ': 'preceptor',
+                            'ชP': 'preceptor',
+                            'ช+': 'preceptor'
                         };
 
                         // New compact codes: ช, บ, ด (+ i) and leave codes
@@ -3006,7 +3009,7 @@ function handleCSVImport(input) {
                         }
 
                         if (token.startsWith('ช') || token.startsWith('บ') || token.startsWith('ด')) {
-                            const isIncharge = token.toLowerCase().endsWith('i');
+                            const isIncharge = token.toLowerCase().endsWith('i') || token.endsWith('อ');
                             const shiftLabel = token.startsWith('ช') ? 'M' : (token.startsWith('บ') ? 'A' : 'N');
                             const role = isIncharge ? 'Incharge1' : 'Med';
                             const roleLabel = ROLE_LABELS[role] || role;

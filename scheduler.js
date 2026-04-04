@@ -577,15 +577,15 @@ class NurseScheduler {
         const shiftCode = (shift, role) => {
             const base = shift === 'M' ? 'ช' : (shift === 'A' ? 'บ' : (shift === 'N' ? 'ด' : shift));
             const isIncharge = typeof role === 'string' && role.toLowerCase().includes('incharge');
-            return isIncharge ? `${base}i` : base;
+            return isIncharge ? `${base}อ` : base;
         };
         const leaveCode = (leaveType) => {
             switch (leaveType) {
                 case 'sick': return 'ป';
                 case 'personal': return 'ก';
-                case 'vacation': return 'V';
+                case 'vacation': return 'ผ';
                 case 'training': return 'อ';
-                case 'preceptor': return 'ชP';
+                case 'preceptor': return 'ชพ';
                 default: return 'ลา';
             }
         };
