@@ -1488,8 +1488,8 @@ textarea {
 /* Compact level selector */
 .level-group {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
 }
 
 .level-group .checkbox-field {
@@ -1509,6 +1509,22 @@ textarea {
 .level-group .checkbox-field input {
   width: 14px;
   height: 14px;
+}
+
+.code-level-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
+  align-items: end;
+}
+
+@media (max-width: 700px) {
+  .code-level-row {
+    grid-template-columns: 1fr;
+  }
+  .level-group {
+    flex-wrap: wrap;
+  }
 }
 
 .nurse-tag.clickable {
