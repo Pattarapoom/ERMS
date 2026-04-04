@@ -59,6 +59,37 @@ function normalizeNurses(list) {
     return cleaned;
 }
 
+function mergeRoleLabels(saved) {
+    const merged = { ...(saved || {}) };
+    Object.entries(ROLE_LABELS).forEach(([key, label]) => {
+        if (!(key in merged)) merged[key] = label;
+    });
+    // Force updated labels for renamed roles
+    merged.Inc_proc = ROLE_LABELS.Inc_proc;
+    merged.Med_proc = ROLE_LABELS.Med_proc;
+    return merged;
+}
+
+function mergeRoleMins(saved) {
+    const merged = {};
+    const shifts = Object.keys(ROLE_MINIMUMS || {});
+    shifts.forEach((shift) => {
+        const defaults = Array.isArray(ROLE_MINIMUMS[shift]) ? ROLE_MINIMUMS[shift] : [];
+        const existing = Array.isArray(saved && saved[shift]) ? saved[shift] : [];
+        const byRole = new Map();
+        existing.forEach((item) => {
+            if (item && item.role) byRole.set(item.role, { ...item });
+        });
+        defaults.forEach((item) => {
+            if (item && item.role && !byRole.has(item.role)) {
+                byRole.set(item.role, { ...item });
+            }
+        });
+        merged[shift] = Array.from(byRole.values());
+    });
+    return merged;
+}
+
 // ──────────────── Init ────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     initFirebase();
@@ -313,8 +344,8 @@ function initSettings() {
     if (config) {
         const c = JSON.parse(config);
         activeQuota = c.quota || SHIFT_QUOTA;
-        activeRoleMins = c.roleMins || ROLE_MINIMUMS;
-        activeRoleLabels = c.roleLabels || ROLE_LABELS;
+        activeRoleMins = mergeRoleMins(c.roleMins);
+        activeRoleLabels = mergeRoleLabels(c.roleLabels);
         activeLeaveLimits = c.leaveLimits || LEAVE_LIMITS_BY_LEVEL;
 
         // Sync with global constants for scheduler
@@ -1134,8 +1165,9 @@ function renderCalendar() {
                         'Triage': { short: 'TR', color: '#2563eb' }, // Blue-600
                         'Med': { short: 'M', color: '#64748b' }, // Slate-500
                         'Inc_proc': { short: 'IP', color: '#0d9488' }, // Teal-600
-                        'Med_proc': { short: 'MP', color: '#0891b2' }, // Cyan-600
+                        'Med_proc': { short: 'IT', color: '#0891b2' }, // Cyan-600
                         'Screen_center': { short: 'SC', color: '#ea580c' }, // Orange-600
+                        'Inc_screen_center': { short: 'ISC', color: '#f97316' }, // Orange-500
                         'Screen_6_8': { short: 'S68', color: '#ca8a04' }, // Yellow-600
                         'Proc_16_20': { short: 'P16', color: '#db2777' }, // Pink-600
                         'Preceptor': { short: 'ช+', color: '#7c3aed' } // Violet-600 (morning+)
@@ -2617,7 +2649,10 @@ function renderNurseList() {
             else if (r === 'Incharge_team') shortLabel = 'ICT';
             else if (r === 'Fast_track') shortLabel = 'FT';
             else if (r === 'Triage') shortLabel = 'TR';
+            else if (r === 'Inc_proc') shortLabel = 'IP';
+            else if (r === 'Med_proc') shortLabel = 'IT';
             else if (r === 'Screen_center') shortLabel = 'SC';
+            else if (r === 'Inc_screen_center') shortLabel = 'ISC';
             return `<span class="badge" style="font-size:10px; background:var(--bg-body); color:var(--text-secondary); border:1px solid var(--border-medium)">${shortLabel}</span>`;
         }).join('');
 

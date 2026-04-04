@@ -77,7 +77,7 @@ class NurseScheduler {
         }
         // Screen 6-8 must be able to continue in morning (Screen_center or ER/Med)
         if (role === 'Screen_6_8') {
-            const canContinue = nurse.roles.includes('Screen_center') || nurse.roles.includes('Med');
+            const canContinue = nurse.roles.includes('Screen_center') || nurse.roles.includes('Inc_screen_center') || nurse.roles.includes('Med');
             if (!canContinue) return false;
         }
         // Morning-only roles

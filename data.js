@@ -15,8 +15,9 @@ const ROLE_MINIMUMS = {
         { role: 'Triage', count: 1 },
         { role: 'Med', count: 3 },
         { role: 'Inc_proc', count: 1 },   // Inc หัตถการ
-        { role: 'Med_proc', count: 1 },   // Med หัตถการ
+        { role: 'Med_proc', count: 1 },   // Inc Trauma
         { role: 'Screen_center', count: 2 },   // คัดกรองกลาง
+        { role: 'Inc_screen_center', count: 0 },   // Inc คัดกรองกลาง (ปรับจำนวนได้)
         { role: 'Screen_6_8', count: 1 },   // คัดกรอง 6-8
     ],
     A: [
@@ -51,7 +52,7 @@ const MAX_CONSECUTIVE_MA = 3; // ห้ามเกิน 3 วันติด�
 // headCode 7: ห้ามดึก, บ่ายเฉพาะวันธรรมดา
 
 // ──────────────────── 6) บทบาทที่เช้าเท่านั้น ────────────────────
-const MORNING_ONLY_ROLES = ['Screen_center', 'Screen_6_8', 'Inc_proc', 'Med_proc'];
+const MORNING_ONLY_ROLES = ['Screen_center', 'Inc_screen_center', 'Screen_6_8', 'Inc_proc', 'Med_proc'];
 
 // ──────────────────── Role labels (Thai) ────────────────────
 const ROLE_LABELS = {
@@ -62,8 +63,9 @@ const ROLE_LABELS = {
     Triage: 'Triage',
     Med: 'Med',
     Inc_proc: 'Inc หัตถการ',
-    Med_proc: 'Med หัตถการ',
+    Med_proc: 'Inc Trauma',
     Screen_center: 'คัดกรองกลาง',
+    Inc_screen_center: 'Inc คัดกรองกลาง',
     Screen_6_8: 'คัดกรอง 6-8',
     Proc_16_20: 'หัตถการ 16-20',
     Screen_16_20: 'คัดกรอง 16-20',
@@ -250,35 +252,35 @@ const SAMPLE_NURSES = [
         "id": "N022",
         "name": "Screening Center 1",
         "headCode": 5,
-        "roles": ["Screen_center", "Med"],
+        "roles": ["Screen_center", "Inc_screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N023",
         "name": "Screening Center 2",
         "headCode": 5,
-        "roles": ["Screen_center", "Med"],
+        "roles": ["Screen_center", "Inc_screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N024",
         "name": "Screening Center 3",
         "headCode": 5,
-        "roles": ["Screen_center", "Med"],
+        "roles": ["Screen_center", "Inc_screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N025",
         "name": "Screening Center 4",
         "headCode": 5,
-        "roles": ["Screen_center", "Med"],
+        "roles": ["Screen_center", "Inc_screen_center", "Med"],
         "level": 1
     },
     {
         "id": "N026",
         "name": "Screening Center 5",
         "headCode": 5,
-        "roles": ["Screen_center", "Med"],
+        "roles": ["Screen_center", "Inc_screen_center", "Med"],
         "level": 1
     },
     {
