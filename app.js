@@ -2637,7 +2637,8 @@ function renderNurseList() {
                     </div>
                     <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
                         ID: <span style="color:var(--text-primary); font-weight:600">${n.id || '-'}</span> · 
-                        HC: <span style="color:var(--primary-dark); font-weight:600">${n.headCode || '5'}</span>
+                        HC: <span style="color:var(--primary-dark); font-weight:600">${n.headCode || '5'}</span> ·
+                        Lv. <span style="color:var(--text-primary); font-weight:600">${Number.isFinite(Number(n.level)) ? n.level : '-'}</span>
                     </div>
                     <div style="margin-top:10px; display:flex; gap:4px; flex-wrap:wrap;">
                         ${rolesHtml}
