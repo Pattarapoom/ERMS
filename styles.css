@@ -1485,6 +1485,32 @@ textarea {
   cursor: pointer;
 }
 
+/* Compact level selector */
+.level-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.level-group .checkbox-field {
+  padding: 6px 10px;
+  min-width: 36px;
+  border-radius: 999px;
+  background: #eef2ff;
+  border: 1px solid #e0e7ff;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.level-group .checkbox-field:hover {
+  background: #e0e7ff;
+}
+
+.level-group .checkbox-field input {
+  width: 14px;
+  height: 14px;
+}
+
 .nurse-tag.clickable {
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);

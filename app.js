@@ -21,33 +21,77 @@ let activeNurses = [];
 let activeQuota = {};
 let activeRoleMins = {};
 let activeRoleLabels = {};
+let activeLeaveLimits = {};
 let firebaseDb = null;
 let firebaseReady = false;
 let monthScheduleUnsubscribe = null;
 let requestsUnsubscribe = null;
 let lastMobileTodayFocusKey = null;
+let suppressFirebaseSync = false; // Prevent Firebase echo from overwriting fresh local writes
+const FIREBASE_SOURCE_OF_TRUTH = true;
+
+function normalizeNurses(list) {
+    if (!Array.isArray(list)) return [];
+    const cleaned = [];
+    list.forEach((n) => {
+        if (!n || typeof n !== 'object') return;
+        const id = String(n.id || n.code || '').trim();
+        if (!id) return;
+        const name = String(n.name || n.fullName || id).trim();
+        let roles = Array.isArray(n.roles) ? n.roles.filter(Boolean) : [];
+        if (roles.length === 0 && typeof n.role === 'string' && n.role.trim()) {
+            roles = [n.role.trim()];
+        }
+        if (roles.length === 0) roles = ['Med'];
+        const headCode = Number.isFinite(Number(n.headCode)) ? Number(n.headCode) : 5;
+        const level = Number.isFinite(Number(n.level)) ? Number(n.level) : 1;
+        const isAdminFlag = !!n.isAdmin;
+        cleaned.push({
+            ...n,
+            id,
+            name,
+            roles,
+            headCode,
+            level,
+            isAdmin: isAdminFlag
+        });
+    });
+    return cleaned;
+}
 
 // ──────────────── Init ────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     initFirebase();
+    
+    // Restore user session from localStorage
+    const savedUser = localStorage.getItem('erms_user');
+    const savedIsAdmin = localStorage.getItem('erms_is_admin');
+    if (savedUser) {
+        currentUser = savedUser;
+        isAdmin = (savedIsAdmin === 'true');
+    }
+    
+    bindEvents(); // Bind events immediately so buttons work!
+
     if (firebaseReady) {
+        // Ensure Firebase is the source of truth before loading local caches
         await syncInitialDataFromFirebase();
     }
+
     initSettings();
     loadFromStorage();
     loadRequests();
     renderMonthLabel();
     renderUserProfile();
-    
+
     // Auto-Sync if Global Database is empty but scheduler has nurses (post-restore case)
     if (activeNurses.length === 0 && scheduler && scheduler.nurses && scheduler.nurses.length > 0) {
-        console.log('[ERMS] Auto-syncing global nurses from scheduler...');
         activeNurses = JSON.parse(JSON.stringify(scheduler.nurses));
         saveGlobalSettings();
     }
 
     renderAll();
-    bindEvents();
+
     if (firebaseReady) {
         subscribeMonthSchedule(currentYear, currentMonth);
         subscribeRequests();
@@ -90,10 +134,12 @@ async function firebaseGet(path) {
 async function firebaseSet(path, value) {
     if (!firebaseReady || !firebaseDb) return false;
     try {
-        await firebaseDb.ref(path).set(value);
+        // Add a 5-second timeout to prevent UI hanging
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+        await Promise.race([firebaseDb.ref(path).set(value), timeout]);
         return true;
     } catch (err) {
-        console.error(`[ERMS] Firebase write failed at ${path}:`, err);
+        console.warn(`[ERMS] Firebase write failed or timed out at ${path}, but local copy is safe.`);
         return false;
     }
 }
@@ -124,18 +170,21 @@ async function syncInitialDataFromFirebase() {
             localStorage.setItem('erms_config', JSON.stringify(remoteSettings.config));
         }
     } else {
-        const localNurses = localStorage.getItem('erms_nurses');
-        const localConfig = localStorage.getItem('erms_config');
-        if (localNurses || localConfig) {
-            const payload = {
-                nurses: localNurses ? JSON.parse(localNurses) : SAMPLE_NURSES,
-                config: localConfig ? JSON.parse(localConfig) : {
-                    quota: SHIFT_QUOTA,
-                    roleMins: ROLE_MINIMUMS,
-                    roleLabels: ROLE_LABELS
-                },
-                updatedAt: new Date().toISOString()
-            };
+        const payload = {
+            nurses: (typeof NURSES_REAL !== 'undefined' && Array.isArray(NURSES_REAL) && NURSES_REAL.length > 0)
+                ? JSON.parse(JSON.stringify(NURSES_REAL))
+                : JSON.parse(JSON.stringify(SAMPLE_NURSES)),
+            config: {
+                quota: SHIFT_QUOTA,
+                roleMins: ROLE_MINIMUMS,
+                roleLabels: ROLE_LABELS,
+                leaveLimits: LEAVE_LIMITS_BY_LEVEL
+            },
+            updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem('erms_nurses', JSON.stringify(payload.nurses));
+        localStorage.setItem('erms_config', JSON.stringify(payload.config));
+        if (FIREBASE_SOURCE_OF_TRUTH) {
             void firebaseSet('erms/settings', payload);
         }
     }
@@ -143,27 +192,17 @@ async function syncInitialDataFromFirebase() {
     if (Array.isArray(remoteRequests)) {
         localStorage.setItem('erms_requests', JSON.stringify(remoteRequests));
     } else {
-        const localRequests = localStorage.getItem('erms_requests');
-        if (localRequests) {
-            try {
-                void firebaseSet('erms/requests', JSON.parse(localRequests));
-            } catch (err) {
-                console.warn('[ERMS] local requests parse failed:', err);
-            }
+        localStorage.setItem('erms_requests', JSON.stringify([]));
+        if (FIREBASE_SOURCE_OF_TRUTH) {
+            void firebaseSet('erms/requests', []);
         }
     }
 
     if (remoteSchedule && typeof remoteSchedule === 'object') {
         localStorage.setItem(getStorageKey(), JSON.stringify(remoteSchedule));
     } else {
-        const localSchedule = localStorage.getItem(getStorageKey());
-        if (localSchedule) {
-            try {
-                void firebaseSet(getFirebaseSchedulePath(), JSON.parse(localSchedule));
-            } catch (err) {
-                console.warn('[ERMS] local schedule parse failed:', err);
-            }
-        }
+        // Firebase is source of truth; clear any stale local cache for this month
+        localStorage.removeItem(getStorageKey());
     }
 }
 
@@ -180,7 +219,8 @@ function saveSettingsToFirebase() {
         config: {
             quota: activeQuota,
             roleMins: activeRoleMins,
-            roleLabels: activeRoleLabels
+            roleLabels: activeRoleLabels,
+            leaveLimits: activeLeaveLimits
         },
         updatedAt: new Date().toISOString()
     };
@@ -197,6 +237,9 @@ function subscribeMonthSchedule(year = currentYear, month = currentMonth) {
     const path = getFirebaseSchedulePath(year, month);
     const ref = firebaseDb.ref(path);
     const handler = (snapshot) => {
+        // Skip if we just wrote data locally — prevent Firebase echo from overwriting
+        if (suppressFirebaseSync) return;
+
         const data = snapshot.val();
         if (!data || typeof data !== 'object') return;
         localStorage.setItem(getStorageKey(year, month), JSON.stringify(data));
@@ -246,7 +289,25 @@ function subscribeRequests() {
 // ──────────────── Settings Persistence ────────────────
 function initSettings() {
     const nurses = localStorage.getItem('erms_nurses');
-    activeNurses = nurses ? JSON.parse(nurses) : SAMPLE_NURSES;
+    if (nurses) {
+        try {
+            activeNurses = JSON.parse(nurses);
+        } catch (e) {
+            activeNurses = [];
+        }
+    }
+    if (!Array.isArray(activeNurses) || activeNurses.length === 0) {
+        if (typeof NURSES_REAL !== 'undefined' && Array.isArray(NURSES_REAL) && NURSES_REAL.length > 0) {
+            activeNurses = JSON.parse(JSON.stringify(NURSES_REAL));
+        } else {
+            activeNurses = JSON.parse(JSON.stringify(SAMPLE_NURSES));
+        }
+        // Auto-save to localStorage for next time
+        localStorage.setItem('erms_nurses', JSON.stringify(activeNurses));
+    }
+
+    activeNurses = normalizeNurses(activeNurses);
+    localStorage.setItem('erms_nurses', JSON.stringify(activeNurses));
 
     const config = localStorage.getItem('erms_config');
     if (config) {
@@ -254,6 +315,7 @@ function initSettings() {
         activeQuota = c.quota || SHIFT_QUOTA;
         activeRoleMins = c.roleMins || ROLE_MINIMUMS;
         activeRoleLabels = c.roleLabels || ROLE_LABELS;
+        activeLeaveLimits = c.leaveLimits || LEAVE_LIMITS_BY_LEVEL;
 
         // Sync with global constants for scheduler
         Object.assign(SHIFT_QUOTA, activeQuota);
@@ -263,15 +325,22 @@ function initSettings() {
         activeQuota = { ...SHIFT_QUOTA };
         activeRoleMins = { ...ROLE_MINIMUMS };
         activeRoleLabels = { ...ROLE_LABELS };
+        activeLeaveLimits = { ...LEAVE_LIMITS_BY_LEVEL };
+    }
+
+    if (!activeLeaveLimits || typeof activeLeaveLimits !== 'object') {
+        activeLeaveLimits = { ...LEAVE_LIMITS_BY_LEVEL };
     }
 }
 
 function saveGlobalSettings() {
+    activeNurses = normalizeNurses(activeNurses);
     localStorage.setItem('erms_nurses', JSON.stringify(activeNurses));
     localStorage.setItem('erms_config', JSON.stringify({
         quota: activeQuota,
         roleMins: activeRoleMins,
-        roleLabels: activeRoleLabels
+        roleLabels: activeRoleLabels,
+        leaveLimits: activeLeaveLimits
     }));
     saveSettingsToFirebase();
 }
@@ -372,6 +441,9 @@ function handleLogin() {
 
     if (success) {
         currentUser = targetRole;
+        // Persist session so page refresh doesn't log out
+        localStorage.setItem('erms_user', currentUser);
+        localStorage.setItem('erms_is_admin', isAdmin ? 'true' : 'false');
 
         updateVisibility();
         closeModal('loginModal');
@@ -407,6 +479,8 @@ function userLogout() {
     if (!confirm('ยืนยันออกจากระบบ?')) return;
     currentUser = null;
     isAdmin = false;
+    localStorage.removeItem('erms_user');
+    localStorage.removeItem('erms_is_admin');
 
     updateVisibility();
     switchTab('calendar');
@@ -454,12 +528,20 @@ function getStorageKey(year = currentYear, month = currentMonth) {
     return `erms_${year}_${month}`;
 }
 
-function saveToStorage() {
+async function saveToStorage() {
     if (!scheduler) return;
     const data = scheduler.toJSON();
     data.nurses = activeNurses; // Save current set of nurses
     localStorage.setItem(getStorageKey(), JSON.stringify(data));
-    void firebaseSet(getFirebaseSchedulePath(), data);
+
+    // Suppress Firebase echo — prevent our own write from triggering a reload
+    suppressFirebaseSync = true;
+    setTimeout(() => { suppressFirebaseSync = false; }, 5000);
+
+    if (firebaseReady) {
+        return await firebaseSet(getFirebaseSchedulePath(), data);
+    }
+    return true;
 }
 
 function loadFromStorage() {
@@ -468,7 +550,7 @@ function loadFromStorage() {
         try {
             const data = JSON.parse(raw);
             // Use saved nurses in data or the global set
-            const nurseData = data.nurses || activeNurses;
+            const nurseData = normalizeNurses(data.nurses || activeNurses);
             scheduler = new NurseScheduler(nurseData, currentMonth, currentYear);
             scheduler.loadFromJSON(data);
         } catch (e) {
@@ -537,17 +619,28 @@ function toggleSidebar() {
 }
 
 // ──────────────── Month Navigation ────────────────
+function setCurrentMonthYear(year, monthIndex) {
+    currentYear = year;
+    currentMonth = monthIndex;
+
+    // Update UI immediately from local data
+    renderMonthLabel();
+    loadFromStorage();
+    renderAll();
+
+    // Background sync
+    if (firebaseReady) {
+        syncMonthFromFirebase(currentYear, currentMonth); // No await, let it happen background
+        subscribeMonthSchedule(currentYear, currentMonth);
+    }
+}
+
 async function changeMonth(delta) {
     currentMonth += delta;
     if (currentMonth > 11) { currentMonth = 0; currentYear++; }
     if (currentMonth < 0) { currentMonth = 11; currentYear--; }
-    renderMonthLabel();
-    if (firebaseReady) {
-        await syncMonthFromFirebase(currentYear, currentMonth);
-        subscribeMonthSchedule(currentYear, currentMonth);
-    }
-    loadFromStorage();
-    renderAll();
+
+    setCurrentMonthYear(currentYear, currentMonth);
 }
 
 const THAI_MONTHS = [
@@ -633,16 +726,65 @@ function scrollToAlerts() {
 }
 
 // ──────────────── Generate Schedule ────────────────
-function generateSchedule() {
+async function generateSchedule() {
     if (!isAdmin) {
-        showToast('error', 'เฉพาะหัวหน้าเวรเท่านั้นที่สามารถสร้างตารางได้');
+        showToast('error', 'เฉพาะหัวหน้าเวรเท่านั้นที่สามารถสร้างตารางได้ (รักษาสิทธิ์ Admin)');
         return;
     }
-    scheduler = new NurseScheduler(activeNurses, currentMonth, currentYear);
-    scheduler.generate();
-    saveToStorage();
-    renderAll();
-    showToast('success', 'สร้างตารางเวรสำเร็จ!');
+
+    try {
+        const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+        const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+        const prevKey = getStorageKey(prevYear, prevMonth);
+        const prevDataRaw = localStorage.getItem(prevKey);
+        let prevSchedule = {};
+        let hasPrev = false;
+
+        if (prevDataRaw) {
+            const prevData = JSON.parse(prevDataRaw);
+            prevSchedule = prevData.schedule || {};
+            hasPrev = true;
+        }
+
+    // AUTO-RECOVERY for nurses
+    if (!activeNurses || activeNurses.length === 0) {
+        const raw = localStorage.getItem('erms_nurses');
+        if (raw) {
+            try {
+                activeNurses = JSON.parse(raw);
+            } catch (e) {
+                activeNurses = [];
+            }
+        }
+        if (!Array.isArray(activeNurses) || activeNurses.length === 0) {
+            if (typeof NURSES_REAL !== 'undefined' && Array.isArray(NURSES_REAL) && NURSES_REAL.length > 0) {
+                activeNurses = JSON.parse(JSON.stringify(NURSES_REAL));
+            } else if (typeof SAMPLE_NURSES !== 'undefined') {
+                activeNurses = JSON.parse(JSON.stringify(SAMPLE_NURSES));
+            }
+        }
+    }
+
+    activeNurses = normalizeNurses(activeNurses);
+
+        if (!activeNurses || activeNurses.length === 0) {
+            showToast('error', 'ไม่พบข้อมูลพยาบาลในระบบ กรุณาตรวจสอบการตั้งค่าพยาบาลก่อน');
+            return;
+        }
+
+        scheduler = new NurseScheduler(activeNurses, currentMonth, currentYear, prevSchedule);
+        scheduler.generate();
+        
+        saveToStorage(); 
+        renderAll();
+        
+        const count = activeNurses.length;
+        const msg = hasPrev ? `สร้างตารางพยาบาล ${count} คน สำเร็จ! (ดึงเงื่อนไขต่อจากเดือนที่แล้วเรียบร้อย)` : `สร้างตารางพยาบาล ${count} คน สำเร็จ! (เริ่มตารางใหม่)`;
+        showToast('success', msg);
+    } catch (err) {
+        console.error(err);
+        showToast('error', 'เกิดข้อผิดพลาด: ' + err.message);
+    }
 }
 
 function regenerateSchedule() {
@@ -892,6 +1034,12 @@ function renderEmptyState() {
 
 // ──────────────── Calendar Render ────────────────
 function renderCalendar() {
+    // Guard: if no schedule data, show empty state instead of crashing
+    if (!scheduler || !scheduler.schedule) {
+        renderEmptyState();
+        return;
+    }
+
     const cal = document.getElementById('calendarView');
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -919,7 +1067,7 @@ function renderCalendar() {
         const isWknd = scheduler.isWeekend(day);
         const dow = scheduler.getDayOfWeek(day);
         const daySchedule = scheduler.schedule[ds];
-        const dayLeaves = scheduler.leaves[ds] || [];
+        const dayLeaves = ((scheduler.leaves || {}))[ds] || [];
 
         // Pending Request Indicators
         const dayPendingSwaps = requests.filter(r =>
@@ -989,12 +1137,14 @@ function renderCalendar() {
                         'Med_proc': { short: 'MP', color: '#0891b2' }, // Cyan-600
                         'Screen_center': { short: 'SC', color: '#ea580c' }, // Orange-600
                         'Screen_6_8': { short: 'S68', color: '#ca8a04' }, // Yellow-600
-                        'Proc_16_20': { short: 'P16', color: '#db2777' } // Pink-600
+                        'Proc_16_20': { short: 'P16', color: '#db2777' }, // Pink-600
+                        'Preceptor': { short: 'ช+', color: '#7c3aed' } // Violet-600 (morning+)
                     };
                     const rTag = roleMapping[a.role] || { short: a.role.substring(0, 2).toUpperCase(), color: '#94a3b8' };
 
-                    // Clean "พว." prefix and show cleaned name
-                    const cleanName = a.nurseName.replace(/^(พว\.|พว|พ\.ว\.|พ\.ว|พยาบาล)\s*/, '');
+                    // Clean "พว." prefix and show cleaned name (safe even if nurseName missing)
+                    const rawName = a.nurseName || (activeNurses.find(n => n.id === a.nurseId)?.name) || a.nurseId || '';
+                    const cleanName = String(rawName).replace(/^(พว\.|พว|พ\.ว\.|พ\.ว|พยาบาล)\s*/, '');
 
                     html += `<div class="nurse-tag-mini ${leaveCls} ${clickable}" ${onclick}>
                         ${pendingDot}
@@ -1135,7 +1285,8 @@ function renderRequestItem(r, canAction) {
     const senderName = r.senderName || activeNurses.find(n => n.id === r.senderId)?.name || r.senderId || 'Unknown User';
 
     if (isLeave) {
-        details = `<strong>${escHtml(senderName)}</strong> ขอลา (${d.leaveType})<br>${d.startDate} ถึง ${d.endDate}`;
+        const leaveLabel = LEAVE_TYPES[d.leaveType]?.label || d.leaveType;
+        details = `<strong>${escHtml(senderName)}</strong> ขอลา (${leaveLabel})<br>${d.startDate} ถึง ${d.endDate}`;
         if (d.reason) details += `<br><i style="font-size:11px;color:var(--text-muted)">" ${escHtml(d.reason)} "</i>`;
         if (r.rejectReason) details += `<br><span style="font-size:11px;color:var(--error);font-weight:700">❌ เหตุผลที่ไม่รับ: ${escHtml(r.rejectReason)}</span>`;
     } else {
@@ -1181,7 +1332,7 @@ function renderRequestItem(r, canAction) {
     `;
 }
 
-function handleRequest(id, action) {
+async function handleRequest(id, action) {
     const r = requests.find(item => item.id === id);
     if (!r) return;
 
@@ -1194,6 +1345,11 @@ function handleRequest(id, action) {
 
     if (r.type === 'leave') {
         const d = r.data;
+        const cap = validateLeaveCapacity(d.nurseId, d.startDate, d.endDate);
+        if (!cap.ok) {
+            showToast('error', `ระดับ ${cap.level} วันที่ ${cap.dateStr} ลาเกินโควต้า (${cap.current}/${cap.limit}) กรุณาคุยกันเองก่อน`);
+            return;
+        }
         const fmt = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         let applied = 0;
         for (let day = new Date(d.startDate); day <= new Date(d.endDate); day.setDate(day.getDate() + 1)) {
@@ -1205,7 +1361,7 @@ function handleRequest(id, action) {
             }
         }
         r.status = 'approved';
-        saveToStorage();
+        await saveToStorage();
         showToast('success', `อนุมัติการลาสำเร็จ (${applied} วัน)`);
     } else if (r.type === 'swap') {
         const isTarget = r.targetId === currentUser;
@@ -1221,7 +1377,7 @@ function handleRequest(id, action) {
                 const res = scheduler.executeSwap(d.originalNurseId, d.targetNurseId, d.dateStr, d.shift);
                 if (res.success) {
                     r.status = 'approved';
-                    saveToStorage();
+                    await saveToStorage();
                     showToast('success', 'หัวหน้าอนุมัติการสลับเวรแทนให้แล้ว (Override)');
                 } else {
                     showToast('error', res.error || 'เกิดข้อผิดพลาดในการสลับเวร');
@@ -1337,7 +1493,7 @@ function renderStats() {
     // Calculate Department Totals
     const totals = {
         M: 0, A: 0, N: 0, totalShifts: 0,
-        sick: 0, personal: 0, vacation: 0, training: 0, totalLeaves: 0
+        sick: 0, personal: 0, vacation: 0, training: 0, preceptor: 0, totalLeaves: 0
     };
 
     Object.values(stats).forEach(s => {
@@ -1349,6 +1505,7 @@ function renderStats() {
         totals.personal += s.leaves.personal || 0;
         totals.vacation += s.leaves.vacation || 0;
         totals.training += s.leaves.training || 0;
+        totals.preceptor += s.leaves.preceptor || 0;
         totals.totalLeaves += s.leaves.total;
     });
 
@@ -1371,6 +1528,7 @@ function renderStats() {
                 <span>กิจ: <b>${totals.personal}</b></span>
                 <span>พักผ่อน: <b>${totals.vacation}</b></span>
                 <span>อบรม: <b>${totals.training}</b></span>
+                <span>Preceptor: <b>${totals.preceptor}</b></span>
             </div>
         </div>
     </div>
@@ -1395,6 +1553,7 @@ function renderStats() {
               <th>ลากิจ</th>
               <th>ลาพักผ่อน</th>
               <th>ลาอบรม</th>
+              <th>Preceptor</th>
               <th>รวมลา</th>
             </tr>
           </thead>
@@ -1416,6 +1575,7 @@ function renderStats() {
         <td class="num-cell stat-leave">${s.leaves.personal || 0}</td>
         <td class="num-cell stat-leave">${s.leaves.vacation || 0}</td>
         <td class="num-cell stat-leave">${s.leaves.training || 0}</td>
+        <td class="num-cell stat-leave">${s.leaves.preceptor || 0}</td>
         <td class="num-cell stat-leave" style="font-weight:700">${s.leaves.total}</td>
       </tr>`;
         });
@@ -1499,7 +1659,7 @@ function renderNurseSummary(targetNurseId = null) {
                 let note = '';
                 if (assignment.isLeave) {
                     status = 'แจ้งลา';
-                    note = `${assignment.leaveType === 'sick' ? 'ลาป่วย' : assignment.leaveType === 'personal' ? 'ลากิจ' : assignment.leaveType === 'vacation' ? 'ลาพักผ่อน' : 'ลาอบรม'}${assignment.urgent ? ' (ฉุกเฉิน)' : ''}`;
+                    note = `${assignment.leaveType === 'sick' ? 'ลาป่วย' : assignment.leaveType === 'personal' ? 'ลากิจ' : assignment.leaveType === 'vacation' ? 'ลาพักผ่อน' : assignment.leaveType === 'preceptor' ? 'ลา Preceptor' : 'ลาอบรม'}${assignment.urgent ? ' (ฉุกเฉิน)' : ''}`;
                 } else if (assignment.swappedFrom) {
                     const original = activeNurses.find(n => n.id === assignment.swappedFrom);
                     status = 'ขึ้นแทน';
@@ -1829,6 +1989,83 @@ function renderApprovalView() {
 // adminLogin function removed (replaced by handleLogin)
 
 // ──────────────── Leave System ────────────────
+function getLeaveLimitForLevel(level) {
+    const lim = (activeLeaveLimits && activeLeaveLimits[level] != null) ? activeLeaveLimits[level] : LEAVE_LIMITS_BY_LEVEL[level];
+    const val = parseInt(lim, 10);
+    return Number.isFinite(val) ? val : 0;
+}
+
+function getNurseLevelById(nurseId, nurseList) {
+    const list = Array.isArray(nurseList) ? nurseList : activeNurses;
+    const nurse = list.find(n => n.id === nurseId);
+    const lv = nurse ? parseInt(nurse.level, 10) : 1;
+    return Number.isFinite(lv) ? lv : 1;
+}
+
+function getMonthData(year, monthIndex) {
+    if (scheduler && year === currentYear && monthIndex === currentMonth) {
+        return { schedule: scheduler.schedule, leaves: scheduler.leaves, nurses: scheduler.nurses };
+    }
+    const raw = localStorage.getItem(getStorageKey(year, monthIndex));
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+}
+
+function collectLeaveNurseIds(dateStr, monthData) {
+    const ids = new Set();
+    if (monthData && monthData.leaves && monthData.leaves[dateStr]) {
+        monthData.leaves[dateStr].forEach(l => {
+            if (l && l.nurseId) ids.add(l.nurseId);
+        });
+        return ids;
+    }
+    if (monthData && monthData.schedule && monthData.schedule[dateStr]) {
+        ['M', 'A', 'N'].forEach(s => {
+            (monthData.schedule[dateStr][s] || []).forEach(a => {
+                if (a && a.isLeave && a.nurseId) ids.add(a.nurseId);
+            });
+        });
+    }
+    return ids;
+}
+
+function countLeavesByLevel(dateStr, monthData) {
+    const ids = collectLeaveNurseIds(dateStr, monthData);
+    const counts = {};
+    ids.forEach(id => {
+        const level = getNurseLevelById(id, monthData?.nurses);
+        counts[level] = (counts[level] || 0) + 1;
+    });
+    return counts;
+}
+
+function validateLeaveCapacity(nurseId, startDate, endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const year = d.getFullYear();
+        const monthIndex = d.getMonth();
+        const dateStr = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+        const monthData = getMonthData(year, monthIndex) || { leaves: {}, schedule: {}, nurses: activeNurses };
+        const leaveIds = collectLeaveNurseIds(dateStr, monthData);
+        if (leaveIds.has(nurseId)) continue; // already off, no new slot consumed
+
+        const level = getNurseLevelById(nurseId, monthData.nurses);
+        const limit = getLeaveLimitForLevel(level);
+        const counts = countLeavesByLevel(dateStr, monthData);
+        const current = counts[level] || 0;
+        if (current >= limit) {
+            return { ok: false, dateStr, level, limit, current };
+        }
+    }
+    return { ok: true };
+}
+
 function openLeaveModal() {
     if (!currentUser) {
         showToast('warning', 'กรุณาเข้าสู่ระบบก่อนทำรายการ');
@@ -1904,6 +2141,12 @@ function submitLeave() {
 
     if (new Date(endDate) < new Date(startDate)) {
         showToast('error', 'วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น');
+        return;
+    }
+
+    const capacityCheck = validateLeaveCapacity(nurseId, startDate, endDate);
+    if (!capacityCheck.ok) {
+        showToast('error', `ระดับ ${capacityCheck.level} วันที่ ${capacityCheck.dateStr} ลาเกินโควต้า (${capacityCheck.current}/${capacityCheck.limit}) กรุณาคุยกันเองก่อน`);
         return;
     }
 
@@ -2432,7 +2675,7 @@ function openAddNurseModal() {
     document.getElementById('nurseEditId').value = '';
     document.getElementById('nurseName').value = '';
     document.getElementById('nurseCode').value = '';
-    document.getElementById('nurseLevel').value = '1';
+    setNurseLevel(1);
     document.getElementById('nurseHeadCode').value = '5';
     document.getElementById('nurseIsAdmin').checked = false;
     renderRoleCheckboxes([]);
@@ -2447,11 +2690,29 @@ function openEditNurseModal(id) {
     document.getElementById('nurseEditId').value = n.id;
     document.getElementById('nurseName').value = n.name;
     document.getElementById('nurseCode').value = n.id;
-    document.getElementById('nurseLevel').value = n.level;
+    setNurseLevel(n.level);
     document.getElementById('nurseHeadCode').value = n.headCode;
     document.getElementById('nurseIsAdmin').checked = !!n.isAdmin;
     renderRoleCheckboxes(n.roles);
     openModal('nurseModal');
+}
+
+function selectNurseLevel(el) {
+    document.querySelectorAll('#nurseLevelGroup input').forEach(input => {
+        if (input !== el) input.checked = false;
+    });
+}
+
+function setNurseLevel(level) {
+    const inputs = document.querySelectorAll('#nurseLevelGroup input');
+    inputs.forEach(input => {
+        input.checked = parseInt(input.value, 10) === parseInt(level, 10);
+    });
+}
+
+function getSelectedNurseLevel() {
+    const checked = document.querySelector('#nurseLevelGroup input:checked');
+    return checked ? parseInt(checked.value, 10) : null;
 }
 
 function renderRoleCheckboxes(selectedRoles) {
@@ -2469,10 +2730,9 @@ function saveNurse() {
     const editId = document.getElementById('nurseEditId').value;
     const name = document.getElementById('nurseName').value;
     const code = document.getElementById('nurseCode').value;
-    const levelStr = document.getElementById('nurseLevel').value;
+    const level = getSelectedNurseLevel();
     const headCodeStr = document.getElementById('nurseHeadCode').value;
 
-    const level = parseInt(levelStr);
     const headCode = parseInt(headCodeStr);
     const isAdminFlag = document.getElementById('nurseIsAdmin').checked;
 
@@ -2481,6 +2741,10 @@ function saveNurse() {
 
     if (!name || !code) {
         showToast('error', 'กรุณากรอกชื่อและรหัส');
+        return;
+    }
+    if (!level) {
+        showToast('error', 'กรุณาเลือกระดับ (1-3)');
         return;
     }
 
@@ -2554,6 +2818,32 @@ function renderQuotaSettings() {
         html += `</tbody></table></div>`;
     });
 
+    html += `
+        <div style="margin-bottom:24px; padding:20px; background:var(--gray-50); border-radius:12px;">
+            <h4 style="margin-bottom:12px; color:var(--primary-dark); display:flex; justify-content:space-between; align-items:center;">
+                โควต้าการลา (ต่อระดับ)
+                <span style="font-size:12px; color:var(--text-muted)">จำกัดจำนวนคนลาพร้อมกัน</span>
+            </h4>
+            <table class="config-table">
+                <thead>
+                    <tr><th>Level</th><th>จำนวนสูงสุด</th></tr>
+                </thead>
+                <tbody>
+                    ${[1, 2, 3, 4].map(lv => `
+                        <tr>
+                            <td>Level ${lv}</td>
+                            <td>
+                                <input type="number" class="form-control" style="width:70px;" min="0"
+                                    value="${activeLeaveLimits[lv] != null ? activeLeaveLimits[lv] : (LEAVE_LIMITS_BY_LEVEL[lv] || 0)}"
+                                    onchange="updateLeaveLimit(${lv}, this.value)">
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+
     container.innerHTML = html;
 }
 
@@ -2577,6 +2867,13 @@ function updateRoleMin(shift, idx, val) {
     showToast('success', 'อัปเดตจำนวนขั้นต่ำแล้ว');
 }
 
+function updateLeaveLimit(level, val) {
+    const v = parseInt(val, 10);
+    activeLeaveLimits[level] = Number.isFinite(v) ? Math.max(0, v) : 0;
+    saveGlobalSettings();
+    showToast('success', `อัปเดตโควต้าลาระดับ ${level} แล้ว`);
+}
+
 function resetToSourceData() {
     if (!confirm('ยืนยันระบบจะรีเซ็ตรายชื่อพยาบาลและเงื่อนไขทั้งหมดกลับไปใช้ค่าเริ่มต้นจากไฟล์ข้อมูล (ข้อมูลที่แก้ไขไว้จะหายไป)?')) return;
 
@@ -2598,7 +2895,7 @@ function handleCSVImport(input) {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function (e) {
+    reader.onload = async function (e) {
         let text = e.target.result;
         // Remove Byte Order Mark (BOM) if exists
         if (text.charCodeAt(0) === 0xFEFF) {
@@ -2606,6 +2903,39 @@ function handleCSVImport(input) {
         }
 
         try {
+            // Ask target month/year for import (default: current view)
+            const defaultYM = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+            const promptValue = window.prompt('นำเข้าเดือน/ปี (รูปแบบ YYYY-MM), เว้นว่างเพื่อใช้เดือนที่เลือกอยู่', defaultYM);
+            if (promptValue === null) return; // user cancelled
+
+            const parseYearMonth = (val) => {
+                const trimmed = (val || '').trim();
+                if (!trimmed) return { year: currentYear, monthIndex: currentMonth };
+                let m = trimmed.match(/^(\d{4})[-\/](\d{1,2})$/);
+                if (m) {
+                    const y = parseInt(m[1], 10);
+                    const mo = parseInt(m[2], 10);
+                    if (mo >= 1 && mo <= 12) return { year: y, monthIndex: mo - 1 };
+                }
+                m = trimmed.match(/^(\d{1,2})[-\/](\d{4})$/);
+                if (m) {
+                    const mo = parseInt(m[1], 10);
+                    const y = parseInt(m[2], 10);
+                    if (mo >= 1 && mo <= 12) return { year: y, monthIndex: mo - 1 };
+                }
+                return null;
+            };
+
+            const target = parseYearMonth(promptValue);
+            if (!target) {
+                showToast('error', 'รูปแบบเดือนไม่ถูกต้อง (ใช้ YYYY-MM เช่น 2026-05)');
+                return;
+            }
+
+            if (target.year !== currentYear || target.monthIndex !== currentMonth) {
+                setCurrentMonthYear(target.year, target.monthIndex);
+            }
+
             const rows = text.split('\n').filter(r => r.trim() !== '');
             if (rows.length < 2) throw new Error('ไฟล์ CSV ไม่ถูกต้อง');
 
@@ -2616,24 +2946,26 @@ function handleCSVImport(input) {
 
             // Initialize new scheduler state
             const newSchedule = {};
+            const newLeaves = {};
+            const dateHelper = new NurseScheduler(activeNurses, currentMonth, currentYear);
             // Pre-fill days
             for (let d of dayColumns) {
-                const ds = scheduler ? scheduler.dateStr(d) : `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const ds = dateHelper.dateStr(d);
                 newSchedule[ds] = { M: [], A: [], N: [] };
             }
 
             // Process data rows
             const dataRows = rows.slice(1);
             dataRows.forEach(row => {
-                // Use regex for CSV parsing to handle quotes correctly
-                const cells = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+                // Better CSV parsing to handle spaces in names
+                const cells = row.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
                 if (cells.length < 2) return;
 
                 const nurseId = cells[0].replace(/"/g, '').trim();
 
                 // Map days
                 dayColumns.forEach((day, idx) => {
-                    const ds = scheduler ? scheduler.dateStr(day) : `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const ds = dateHelper.dateStr(day);
                     const cellValue = cells[idx + 2]?.replace(/"/g, '').trim() || '-';
 
                     if (cellValue === '-') return;
@@ -2641,8 +2973,56 @@ function handleCSVImport(input) {
                     // Support multiple shifts e.g. M:Head/A:Med
                     const shiftParts = cellValue.split('/');
                     shiftParts.forEach(part => {
-                        let [shiftLabel, role] = part.split(':');
+                        let token = part.trim();
+                        if (!token) return;
+
+                        const nurse = activeNurses.find(n => n.id === nurseId);
+                        const nurseName = nurse ? nurse.name : nurseId;
+
+                        const leaveMap = {
+                            'ป': 'sick',
+                            'ก': 'personal',
+                            'V': 'vacation',
+                            'อ': 'training',
+                            'ชP': 'preceptor'
+                        };
+
+                        // New compact codes: ช, บ, ด (+ i) and leave codes
+                        if (leaveMap[token]) {
+                            const leaveType = leaveMap[token];
+                            const shiftLabel = 'M'; // default for leave-only code
+                            const role = leaveType === 'preceptor' ? 'Preceptor' : 'Med';
+                            const roleLabel = leaveType === 'preceptor' ? 'Preceptor+' : ROLE_LABELS['Med'];
+                            newSchedule[ds][shiftLabel].push({
+                                nurseId,
+                                nurseName,
+                                role,
+                                roleLabel,
+                                isLeave: true,
+                                leaveType,
+                                isLeavePlaceholder: leaveType === 'preceptor'
+                            });
+                            return;
+                        }
+
+                        if (token.startsWith('ช') || token.startsWith('บ') || token.startsWith('ด')) {
+                            const isIncharge = token.toLowerCase().endsWith('i');
+                            const shiftLabel = token.startsWith('ช') ? 'M' : (token.startsWith('บ') ? 'A' : 'N');
+                            const role = isIncharge ? 'Incharge1' : 'Med';
+                            const roleLabel = ROLE_LABELS[role] || role;
+                            newSchedule[ds][shiftLabel].push({
+                                nurseId,
+                                nurseName,
+                                role,
+                                roleLabel,
+                                isLeave: false
+                            });
+                            return;
+                        }
+
+                        let [shiftLabel, role] = token.split(':');
                         let isLeave = false;
+                        let leaveType = null;
 
                         if (shiftLabel.startsWith('ลา(')) {
                             isLeave = true;
@@ -2650,10 +3030,14 @@ function handleCSVImport(input) {
                         }
 
                         if (['M', 'A', 'N'].includes(shiftLabel)) {
+                            const roleLabel = ROLE_LABELS[role || 'Med'] || role || 'Med';
                             newSchedule[ds][shiftLabel].push({
-                                nurseId: nurseId,
+                                nurseId,
+                                nurseName,
                                 role: role || 'Med', // Default role if missing
-                                isLeave: isLeave
+                                roleLabel,
+                                isLeave,
+                                leaveType
                             });
                         }
                     });
@@ -2665,12 +3049,29 @@ function handleCSVImport(input) {
                 scheduler = new NurseScheduler(activeNurses, currentMonth, currentYear);
             }
             scheduler.schedule = newSchedule;
+            // Build leave list from schedule
+            Object.entries(newSchedule).forEach(([dateStr, day]) => {
+                ['M', 'A', 'N'].forEach((s) => {
+                    (day[s] || []).forEach(a => {
+                        if (!a.isLeave) return;
+                        if (!newLeaves[dateStr]) newLeaves[dateStr] = [];
+                        newLeaves[dateStr].push({
+                            nurseId: a.nurseId,
+                            nurseName: a.nurseName || a.nurseId,
+                            leaveType: a.leaveType || 'personal',
+                            urgent: false,
+                            reason: ''
+                        });
+                    });
+                });
+            });
+            scheduler.leaves = newLeaves;
             scheduler.locked = true;
             scheduler.rebuildCounters();
 
-            saveToStorage();
+            saveToStorage(); // Fire and forget or background sync for responsive UI
             renderAll();
-            showToast('success', 'นำเข้าตารางเวรจาก CSV สำเร็จ!');
+            showToast('success', 'นำเข้าตารางเวรสำเร็จ! (ระบบกำลังบันทึกเข้า Cloud เบื้องหลัง)');
         } catch (err) {
             console.error(err);
             showToast('error', 'เกิดข้อผิดพลาดในการอ่านไฟล์ CSV: ' + err.message);

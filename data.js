@@ -83,6 +83,16 @@ const LEAVE_TYPES = {
     personal: { label: 'ลากิจ', color: '#f97316', icon: '📋' },
     vacation: { label: 'ลาพักผ่อน', color: '#22c55e', icon: '🌴' },
     training: { label: 'ลาอบรม', color: '#3b82f6', icon: '📚' },
+    preceptor: { label: 'Preceptor', color: '#a855f7', icon: '🎓' },
+};
+
+// ──────────────────── Leave Limits by Level ────────────────────
+// Max simultaneous off/leave per level
+const LEAVE_LIMITS_BY_LEVEL = {
+    1: 3,
+    2: 2,
+    3: 2,
+    4: 2
 };
 
 // ──────────────────── Sample Nurses (Demo Data) ────────────────────

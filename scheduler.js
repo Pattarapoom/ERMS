@@ -46,16 +46,20 @@ class NurseScheduler {
 
     // ──────────────── Constraint Checks ────────────────
 
-    /** Check headCode constraints */
-    canAssignShift(nurse, shift, day) {
+    /** Check headCode constraints (relaxedShift allows A shift for headCode 8/9 in shortage case) */
+    canAssignShift(nurse, shift, day, relaxedShift = false) {
         const hc = nurse.headCode;
         const weekend = this.isWeekend(day);
 
         if (hc === 9) {
-            if (shift !== 'M') return false;
+            if (shift !== 'M') {
+                if (!(relaxedShift && shift === 'A')) return false;
+            }
         }
         if (hc === 8) {
-            if (shift !== 'M') return false;
+            if (shift !== 'M') {
+                if (!(relaxedShift && shift === 'A')) return false;
+            }
         }
         if (hc === 7) {
             if (shift === 'N') return false;
@@ -70,6 +74,11 @@ class NurseScheduler {
             if ((role === 'Incharge1' || role === 'Incharge_team') && !this.isWeekend(day)) {
                 return false;
             }
+        }
+        // Screen 6-8 must be able to continue in morning (Screen_center or ER/Med)
+        if (role === 'Screen_6_8') {
+            const canContinue = nurse.roles.includes('Screen_center') || nurse.roles.includes('Med');
+            if (!canContinue) return false;
         }
         // Morning-only roles
         if (MORNING_ONLY_ROLES.includes(role) && shift !== 'M') return false;
@@ -124,14 +133,24 @@ class NurseScheduler {
         return false;
     }
 
-    /** Check if nurse already assigned on this day */
-    isAssignedOnDay(nurseId, day) {
+    /** Check if nurse can take another shift on the same day */
+    canAssignSameDay(nurseId, day, shift) {
         const ds = this.dateStr(day);
         const daySchedule = this.schedule[ds];
-        if (!daySchedule) return false;
-        for (const s of ['M', 'A', 'N']) {
-            if ((daySchedule[s] || []).some(a => a.nurseId === nurseId)) return true;
-        }
+        if (!daySchedule) return true;
+
+        const hasM = (daySchedule.M || []).some(a => a.nurseId === nurseId);
+        const hasA = (daySchedule.A || []).some(a => a.nurseId === nurseId);
+        const hasN = (daySchedule.N || []).some(a => a.nurseId === nurseId);
+
+        const total = (hasM ? 1 : 0) + (hasA ? 1 : 0) + (hasN ? 1 : 0);
+        if (total === 0) return true;
+        if (total >= 2) return false; // allow at most 2 shifts/day
+
+        // Allow only M+A or M+N combinations (any order)
+        if (hasM) return (shift === 'A' || shift === 'N') && !hasA && !hasN;
+        if (hasA) return shift === 'M' && !hasM && !hasN;
+        if (hasN) return shift === 'M' && !hasM && !hasA;
         return false;
     }
 
@@ -209,7 +228,11 @@ class NurseScheduler {
         // Step 1: Fill mandatory roles
         for (const rn of rolesNeeded) {
             for (let i = 0; i < rn.count; i++) {
-                const candidates = this._getCandidates(day, shift, rn.role, assignedIds);
+                let candidates = this._getCandidates(day, shift, rn.role, assignedIds, false);
+                if (candidates.length === 0 && shift === 'A') {
+                    // Shortage override: allow headCode 8/9 to take A when no candidates
+                    candidates = this._getCandidates(day, shift, rn.role, assignedIds, true);
+                }
                 if (candidates.length > 0) {
                     const chosen = candidates[0];
                     this.schedule[ds][shift].push({
@@ -240,7 +263,11 @@ class NurseScheduler {
         const quota = SHIFT_QUOTA[shift];
         let current = this.schedule[ds][shift].filter(a => !a.isShortage).length;
         while (current < quota) {
-            const candidates = this._getCandidates(day, shift, 'Med', assignedIds);
+            let candidates = this._getCandidates(day, shift, 'Med', assignedIds, false);
+            if (candidates.length === 0 && shift === 'A') {
+                // Shortage override: allow headCode 8/9 to take A when no candidates
+                candidates = this._getCandidates(day, shift, 'Med', assignedIds, true);
+            }
             if (candidates.length === 0) break;
             const chosen = candidates[0];
             this.schedule[ds][shift].push({
@@ -257,13 +284,13 @@ class NurseScheduler {
         }
     }
 
-    _getCandidates(day, shift, role, excludeIds) {
+    _getCandidates(day, shift, role, excludeIds, relaxedShift = false) {
         return this.shuffledNurses
             .filter(n => {
                 if (excludeIds.has(n.id)) return false;
-                if (!this.canAssignShift(n, shift, day)) return false;
+                if (!this.canAssignShift(n, shift, day, relaxedShift)) return false;
                 if (!this.canAssignRole(n, role, shift, day)) return false;
-                if (this.isAssignedOnDay(n.id, day)) return false;
+                if (!this.canAssignSameDay(n.id, day, shift)) return false;
                 if (this.isOnLeave(n.id, day)) return false;
                 if (this.hasForbiddenTransition(n.id, shift, day)) return false;
                 if (this.wouldExceedConsecutiveMA(n.id, shift, day)) return false;
@@ -305,6 +332,15 @@ class NurseScheduler {
 
         // Mark leave in schedule
         if (this.schedule[dateStr]) {
+            if (leaveType === 'preceptor') {
+                // Remove any existing assignments for that day (no staffing counted)
+                for (const shift of ['M', 'A', 'N']) {
+                    const assignments = this.schedule[dateStr][shift] || [];
+                    this.schedule[dateStr][shift] = assignments.filter(a => a.nurseId !== nurseId);
+                }
+            }
+
+            let marked = false;
             for (const shift of ['M', 'A', 'N']) {
                 const assignments = this.schedule[dateStr][shift];
                 const idx = assignments.findIndex(a => a.nurseId === nurseId);
@@ -312,7 +348,23 @@ class NurseScheduler {
                     assignments[idx].isLeave = true;
                     assignments[idx].leaveType = leaveType;
                     assignments[idx].urgent = urgent;
+                    marked = true;
                 }
+            }
+
+            // For Preceptor leave, show as morning+ in schedule (non-staffing)
+            if (leaveType === 'preceptor' && !marked) {
+                if (!this.schedule[dateStr].M) this.schedule[dateStr].M = [];
+                this.schedule[dateStr].M.push({
+                    nurseId,
+                    nurseName: nurse ? nurse.name : nurseId,
+                    role: 'Preceptor',
+                    roleLabel: 'Preceptor+',
+                    isLeave: true,
+                    leaveType,
+                    urgent,
+                    isLeavePlaceholder: true
+                });
             }
         }
 
@@ -332,6 +384,10 @@ class NurseScheduler {
                 const assignments = this.schedule[dateStr][shift];
                 const aidx = assignments.findIndex(a => a.nurseId === nurseId);
                 if (aidx >= 0) {
+                    if (assignments[aidx].isLeavePlaceholder) {
+                        assignments.splice(aidx, 1);
+                        continue;
+                    }
                     assignments[aidx].isLeave = false;
                     delete assignments[aidx].leaveType;
                     delete assignments[aidx].urgent;
@@ -359,7 +415,7 @@ class NurseScheduler {
             if (n.id === nurseId) return;
 
             // --- HARD RULES (Non-negotiable) ---
-            if (this.isAssignedOnDay(n.id, day)) return;
+            if (!this.canAssignSameDay(n.id, day, shift)) return;
             if (this.isOnLeave(n.id, day)) return;
 
             // --- SOFT RULES (Negotiable in emergency) ---
@@ -494,7 +550,7 @@ class NurseScheduler {
         const stats = {};
         this.nurses.forEach(n => {
             const c = this.counters[n.id];
-            const leaveCount = { sick: 0, personal: 0, vacation: 0, training: 0, total: 0 };
+            const leaveCount = { sick: 0, personal: 0, vacation: 0, training: 0, preceptor: 0, total: 0 };
             Object.values(this.leaves).forEach(dayLeaves => {
                 dayLeaves.forEach(l => {
                     if (l.nurseId === n.id) {
@@ -518,6 +574,22 @@ class NurseScheduler {
 
     // ──────────────── Export Helpers ────────────────
     exportCalendarCSV() {
+        const shiftCode = (shift, role) => {
+            const base = shift === 'M' ? 'ช' : (shift === 'A' ? 'บ' : (shift === 'N' ? 'ด' : shift));
+            const isIncharge = typeof role === 'string' && role.toLowerCase().includes('incharge');
+            return isIncharge ? `${base}i` : base;
+        };
+        const leaveCode = (leaveType) => {
+            switch (leaveType) {
+                case 'sick': return 'ป';
+                case 'personal': return 'ก';
+                case 'vacation': return 'V';
+                case 'training': return 'อ';
+                case 'preceptor': return 'ชP';
+                default: return 'ลา';
+            }
+        };
+
         let csv = 'รหัส,ชื่อ';
         for (let d = 1; d <= this.daysInMonth; d++) {
             csv += `,${d}`;
@@ -525,7 +597,11 @@ class NurseScheduler {
         csv += '\n';
 
         this.nurses.forEach(n => {
-            let row = `${n.id},${n.name}`;
+            const fallbackName = (typeof activeNurses !== 'undefined' && Array.isArray(activeNurses))
+                ? (activeNurses.find(x => x.id === n.id)?.name || '')
+                : '';
+            const displayName = n.name || fallbackName || n.id;
+            let row = `${n.id},${displayName}`;
             for (let d = 1; d <= this.daysInMonth; d++) {
                 const ds = this.dateStr(d);
                 let shifts = [];
@@ -534,8 +610,12 @@ class NurseScheduler {
                     for (const shift of ['M', 'A', 'N']) {
                         const a = daySchedule[shift].find(x => x.nurseId === n.id);
                         if (a) {
-                            const roleSuffix = a.role ? `:${a.role}` : '';
-                            shifts.push(a.isLeave ? `ลา(${shift})${roleSuffix}` : `${shift}${roleSuffix}`);
+                            if (a.isLeave) {
+                                const code = leaveCode(a.leaveType);
+                                shifts.push(code);
+                            } else {
+                                shifts.push(shiftCode(shift, a.role));
+                            }
                         }
                     }
                 }
@@ -549,11 +629,11 @@ class NurseScheduler {
 
     exportStatsCSV() {
         const stats = this.getStats();
-        let csv = 'รหัส,ชื่อ,HeadCode,Level,เช้า(M),บ่าย(A),ดึก(N),รวมเวร,ลาป่วย,ลากิจ,ลาพักผ่อน,ลาอบรม,รวมลา\n';
+        let csv = 'รหัส,ชื่อ,HeadCode,Level,เช้า(M),บ่าย(A),ดึก(N),รวมเวร,ลาป่วย,ลากิจ,ลาพักผ่อน,ลาอบรม,ลา Preceptor,รวมลา\n';
         Object.values(stats)
             .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
             .forEach(s => {
-                csv += `${s.id},${s.name},${s.headCode},${s.level},${s.shifts.M},${s.shifts.A},${s.shifts.N},${s.shifts.total},${s.leaves.sick},${s.leaves.personal},${s.leaves.vacation},${s.leaves.training},${s.leaves.total}\n`;
+                csv += `${s.id},${s.name},${s.headCode},${s.level},${s.shifts.M},${s.shifts.A},${s.shifts.N},${s.shifts.total},${s.leaves.sick},${s.leaves.personal},${s.leaves.vacation},${s.leaves.training},${s.leaves.preceptor},${s.leaves.total}\n`;
             });
         return csv;
     }
@@ -576,12 +656,12 @@ class NurseScheduler {
     loadFromJSON(data) {
         this.month = data.month;
         this.year = data.year;
-        this.daysInMonth = data.daysInMonth;
-        this.schedule = data.schedule;
+        this.daysInMonth = data.daysInMonth || new Date(this.year, this.month + 1, 0).getDate();
+        this.schedule = data.schedule || {};
         this.leaves = data.leaves || {};
         this.swaps = data.swaps || [];
-        this.counters = data.counters;
-        this.locked = data.locked;
+        this.counters = data.counters || {};
+        this.locked = data.locked || false;
         this.lastUpdate = data.lastUpdate;
     }
 
