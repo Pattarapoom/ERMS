@@ -577,7 +577,7 @@ class NurseScheduler {
         const shiftCode = (shift, role) => {
             const base = shift === 'M' ? 'ช' : (shift === 'A' ? 'บ' : (shift === 'N' ? 'ด' : shift));
             const isIncharge = typeof role === 'string' && role.toLowerCase().includes('incharge');
-            return isIncharge ? `${base}อ` : base;
+            return isIncharge ? `${base}i` : base;
         };
         const leaveCode = (leaveType) => {
             switch (leaveType) {
