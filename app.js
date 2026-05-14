@@ -1323,6 +1323,7 @@ function renderRequestItem(r, canAction) {
     const isLeave = r.type === 'leave';
     const title = isLeave ? 'ขอลาหยุด' : 'ขอสลับเวร';
     const icon = isLeave ? 'description' : 'swap_horiz';
+    const requestedAt = formatRequestTime(r.createdAt);
 
     const statusLabels = {
         'pending_target': 'รอคนแลกตอบตกลง',
@@ -1339,6 +1340,7 @@ function renderRequestItem(r, canAction) {
     if (isLeave) {
         const leaveLabel = LEAVE_TYPES[d.leaveType]?.label || d.leaveType;
         details = `<strong>${escHtml(senderName)}</strong> ขอลา (${leaveLabel})<br>${d.startDate} ถึง ${d.endDate}`;
+        details += `<br><span style="font-size:11px;color:var(--text-muted)">ส่งคำขอ: ${escHtml(requestedAt)}</span>`;
         if (d.reason) details += `<br><i style="font-size:11px;color:var(--text-muted)">" ${escHtml(d.reason)} "</i>`;
         if (r.rejectReason) details += `<br><span style="font-size:11px;color:var(--error);font-weight:700">❌ เหตุผลที่ไม่รับ: ${escHtml(r.rejectReason)}</span>`;
     } else {
@@ -1358,6 +1360,7 @@ function renderRequestItem(r, canAction) {
             }
         }
         if (r.rejectReason) details += `<br><span style="font-size:11px;color:var(--error);font-weight:700">❌ เหตุผลที่ไม่รับ: ${escHtml(r.rejectReason)}</span>`;
+        details += `<br><span style="font-size:11px;color:var(--text-muted)">ส่งคำขอ: ${escHtml(requestedAt)}</span>`;
     }
 
     let actionsHtml = '';
@@ -1384,6 +1387,19 @@ function renderRequestItem(r, canAction) {
     `;
 }
 
+function formatRequestTime(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString('th-TH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
 async function handleRequest(id, action) {
     const r = requests.find(item => item.id === id);
     if (!r) return;
@@ -1397,9 +1413,13 @@ async function handleRequest(id, action) {
 
     if (r.type === 'leave') {
         const d = r.data;
-        const cap = validateLeaveCapacity(d.nurseId, d.startDate, d.endDate);
+        const cap = validateLeaveCapacity(d.nurseId, d.startDate, d.endDate, {
+            includeQueue: true,
+            requestId: r.id,
+            cutoffMs: getRequestTimeMs(r)
+        });
         if (!cap.ok) {
-            showToast('error', `ระดับ ${cap.level} วันที่ ${cap.dateStr} ลาเกินโควต้า (${cap.current}/${cap.limit}) กรุณาคุยกันเองก่อน`);
+            showToast('error', `ระดับ ${cap.level} วันที่ ${cap.dateStr} คิวลาถูกจองเต็มแล้ว (${cap.current}/${cap.limit}) ต้องอนุมัติตามลำดับคนที่ขอก่อน`);
             return;
         }
         const fmt = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -2006,7 +2026,9 @@ function renderApprovalView() {
     }
 
     // For Admin/Head: See anything that is pending
-    const actionableRequests = requests.filter(r => r.status.includes('pending'));
+    const actionableRequests = requests
+        .filter(r => r.status.includes('pending'))
+        .sort((a, b) => getRequestTimeMs(a) - getRequestTimeMs(b));
 
     if (actionableRequests.length === 0) {
         container.innerHTML = `
@@ -2090,7 +2112,33 @@ function countLeavesByLevel(dateStr, monthData) {
     return counts;
 }
 
-function validateLeaveCapacity(nurseId, startDate, endDate) {
+function getRequestTimeMs(request) {
+    const parsed = Date.parse(request?.createdAt || '');
+    if (Number.isFinite(parsed)) return parsed;
+    const fallback = Number(request?.id);
+    return Number.isFinite(fallback) ? fallback : 0;
+}
+
+function collectQueuedLeaveNurseIds(dateStr, level, options = {}) {
+    const ids = new Set();
+    const cutoffMs = options.cutoffMs ?? Date.now();
+    const currentRequestId = options.requestId || null;
+
+    requests.forEach(r => {
+        if (!r || r.id === currentRequestId || r.type !== 'leave' || r.status !== 'pending_admin') return;
+        const d = r.data || {};
+        if (!d.nurseId || !d.startDate || !d.endDate) return;
+        if (dateStr < d.startDate || dateStr > d.endDate) return;
+        if (getRequestTimeMs(r) >= cutoffMs) return;
+
+        const reqLevel = getNurseLevelById(d.nurseId);
+        if (reqLevel === level) ids.add(d.nurseId);
+    });
+
+    return ids;
+}
+
+function validateLeaveCapacity(nurseId, startDate, endDate, options = {}) {
     const start = new Date(startDate);
     const end = new Date(endDate);
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -2105,9 +2153,16 @@ function validateLeaveCapacity(nurseId, startDate, endDate) {
         const level = getNurseLevelById(nurseId, monthData.nurses);
         const limit = getLeaveLimitForLevel(level);
         const counts = countLeavesByLevel(dateStr, monthData);
+        const queuedIds = options.includeQueue ? collectQueuedLeaveNurseIds(dateStr, level, options) : new Set();
+        queuedIds.forEach(id => {
+            if (!leaveIds.has(id)) {
+                counts[level] = (counts[level] || 0) + 1;
+            }
+        });
+
         const current = counts[level] || 0;
         if (current >= limit) {
-            return { ok: false, dateStr, level, limit, current };
+            return { ok: false, dateStr, level, limit, current, queued: queuedIds.size };
         }
     }
     return { ok: true };
@@ -2202,9 +2257,12 @@ function submitLeave() {
         return;
     }
 
-    const capacityCheck = validateLeaveCapacity(nurseId, startDate, endDate);
+    const capacityCheck = validateLeaveCapacity(nurseId, startDate, endDate, {
+        includeQueue: true,
+        cutoffMs: Date.now()
+    });
     if (!capacityCheck.ok) {
-        showToast('error', `ระดับ ${capacityCheck.level} วันที่ ${capacityCheck.dateStr} ลาเกินโควต้า (${capacityCheck.current}/${capacityCheck.limit}) กรุณาคุยกันเองก่อน`);
+        showToast('error', `ระดับ ${capacityCheck.level} วันที่ ${capacityCheck.dateStr} คิวลาเต็มแล้ว (${capacityCheck.current}/${capacityCheck.limit}) ต้องให้สิทธิคนที่ขอก่อน`);
         return;
     }
 
