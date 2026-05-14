@@ -114,6 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     initSettings();
+    await applyInitialScheduleSeeds();
     loadFromStorage();
     loadRequests();
     renderMonthLabel();
@@ -319,6 +320,113 @@ function subscribeRequests() {
 
     ref.on('value', handler);
     requestsUnsubscribe = () => ref.off('value', handler);
+}
+
+// ──────────────── Initial Schedule Seeds ────────────────
+function getInitialScheduleSeeds() {
+    const seeds = window.ERMS_INITIAL_SCHEDULE_SEEDS;
+    return Array.isArray(seeds)
+        ? seeds.filter(seed => seed && typeof seed === 'object' && seed.data && typeof seed.data === 'object')
+        : [];
+}
+
+function mergeSeedNurses(seedNurses) {
+    const normalized = normalizeNurses(seedNurses);
+    if (normalized.length === 0) return false;
+
+    const existingIds = new Set(activeNurses.map(n => n.id));
+    const existingNames = new Set(activeNurses.map(n => n.name));
+    let changed = false;
+
+    normalized.forEach((nurse) => {
+        const existing = activeNurses.find(n => n.id === nurse.id) || activeNurses.find(n => n.name === nurse.name);
+        if (existing) {
+            const roles = new Set([...(existing.roles || []), ...(nurse.roles || [])]);
+            if (roles.size !== (existing.roles || []).length) {
+                existing.roles = Array.from(roles);
+                changed = true;
+            }
+            return;
+        }
+        activeNurses.push(nurse);
+        existingIds.add(nurse.id);
+        existingNames.add(nurse.name);
+        changed = true;
+    });
+
+    return changed;
+}
+
+function shouldReplaceScheduleWithSeed(existingSchedule, seedId) {
+    return !!(
+        existingSchedule &&
+        existingSchedule.seedManaged === true &&
+        existingSchedule.seedId &&
+        existingSchedule.seedId !== seedId
+    );
+}
+
+async function applyInitialScheduleSeeds() {
+    const seeds = getInitialScheduleSeeds();
+    if (seeds.length === 0) return;
+
+    let firstSeedMonth = null;
+    let settingsChanged = false;
+
+    for (const seed of seeds) {
+        const year = Number(seed.year);
+        const month = Number(seed.month);
+        if (!Number.isInteger(year) || !Number.isInteger(month) || month < 0 || month > 11) continue;
+
+        const data = JSON.parse(JSON.stringify(seed.data));
+        data.year = year;
+        data.month = month;
+        data.nurses = normalizeNurses(data.nurses || activeNurses);
+
+        if (!firstSeedMonth) firstSeedMonth = { year, month };
+        settingsChanged = mergeSeedNurses(data.nurses) || settingsChanged;
+
+        const localKey = getStorageKey(year, month);
+        const localRaw = localStorage.getItem(localKey);
+        let localSchedule = null;
+        if (localRaw) {
+            try {
+                localSchedule = JSON.parse(localRaw);
+            } catch (e) {
+                localSchedule = null;
+            }
+        }
+        const remoteSchedule = firebaseReady ? await firebaseGet(getFirebaseSchedulePath(year, month)) : null;
+        const hasRemoteSchedule = remoteSchedule && typeof remoteSchedule === 'object';
+
+        if (hasRemoteSchedule) {
+            if (shouldReplaceScheduleWithSeed(remoteSchedule, seed.id)) {
+                localStorage.setItem(localKey, JSON.stringify(data));
+                if (FIREBASE_SOURCE_OF_TRUTH) {
+                    await firebaseSet(getFirebaseSchedulePath(year, month), data);
+                }
+            } else if (!localSchedule || shouldReplaceScheduleWithSeed(localSchedule, seed.id)) {
+                localStorage.setItem(localKey, JSON.stringify(remoteSchedule));
+            }
+            continue;
+        }
+
+        if (!localSchedule || shouldReplaceScheduleWithSeed(localSchedule, seed.id)) {
+            localStorage.setItem(localKey, JSON.stringify(data));
+            if (firebaseReady && FIREBASE_SOURCE_OF_TRUTH) {
+                await firebaseSet(getFirebaseSchedulePath(year, month), data);
+            }
+        }
+    }
+
+    if (settingsChanged) {
+        saveGlobalSettings();
+    }
+
+    if (firstSeedMonth && !localStorage.getItem(getStorageKey(currentYear, currentMonth))) {
+        currentYear = firstSeedMonth.year;
+        currentMonth = firstSeedMonth.month;
+    }
 }
 
 // ──────────────── Settings Persistence ────────────────
@@ -1190,6 +1298,7 @@ function renderCalendar() {
                         'Inc_screen_center': { short: 'ISC', color: '#f97316' }, // Orange-500
                         'Screen_6_8': { short: 'S68', color: '#ca8a04' }, // Yellow-600
                         'Proc_16_20': { short: 'P16', color: '#db2777' }, // Pink-600
+                        'Refer': { short: 'R', color: '#0369a1' }, // Sky-700
                         'Preceptor': { short: 'ชP', color: '#7c3aed' } // Violet-600 (morning+)
                     };
                     const rTag = roleMapping[a.role] || { short: a.role.substring(0, 2).toUpperCase(), color: '#94a3b8' };

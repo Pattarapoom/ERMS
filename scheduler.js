@@ -667,10 +667,10 @@ class NurseScheduler {
     }
 
     exportCalendarCSVByRole() {
-        const shiftCode = (shift, role) => {
+        const shiftCode = (shift, role, suffix = '') => {
             const base = shift === 'M' ? 'ช' : (shift === 'A' ? 'บ' : (shift === 'N' ? 'ด' : shift));
             const isIncharge = typeof role === 'string' && role.toLowerCase().includes('incharge');
-            return isIncharge ? `${base}i` : base;
+            return `${base}${isIncharge ? 'i' : ''}${suffix}`;
         };
         const leaveCode = (leaveType) => {
             switch (leaveType) {
@@ -702,6 +702,13 @@ class NurseScheduler {
                 label: 'หัตถการ',
                 suffix: 'G',
                 roles: new Set(['Inc_proc', 'Med_proc', 'Proc_16_20']),
+                autoFill: true,
+                showLeave: false
+            },
+            {
+                label: 'Refer',
+                suffix: 'R',
+                roles: new Set(['Refer']),
                 autoFill: true,
                 showLeave: false
             },
