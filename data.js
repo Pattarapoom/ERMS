@@ -81,11 +81,18 @@ const SHIFT_COLORS = {
 
 // ──────────────────── Leave Types ────────────────────
 const LEAVE_TYPES = {
-    sick: { label: 'ลาป่วย', color: '#ef4444', icon: '🤒' },
+    off: { label: 'ขอหยุด', color: '#64748b', icon: '⏸️' },
     personal: { label: 'ลากิจ', color: '#f97316', icon: '📋' },
+    sick: { label: 'ลาป่วย', color: '#ef4444', icon: '🤒' },
     vacation: { label: 'ลาพักผ่อน', color: '#22c55e', icon: '🌴' },
     training: { label: 'ลาอบรม', color: '#3b82f6', icon: '📚' },
     preceptor: { label: 'Preceptor', color: '#a855f7', icon: '🎓' },
+    education: { label: 'ลาศึกษา', color: '#06b6d4', icon: '🏫' },
+    religious: { label: 'ลาประกอบพิธีทางศาสนา', color: '#8b5cf6', icon: '🙏' },
+    military: { label: 'ลาเข้ารับการเตรียมพล', color: '#475569', icon: '🪖' },
+    maternity: { label: 'ลาคลอด', color: '#ec4899', icon: '🍼' },
+    paternity: { label: 'ลาไปช่วยเหลือภริยาที่คลอดบุตร', color: '#14b8a6', icon: '👶' },
+    sterilization: { label: 'ลาทำหมัน', color: '#f59e0b', icon: '🏥' },
 };
 
 // ──────────────────── Leave Limits by Level ────────────────────

@@ -46,6 +46,8 @@ function normalizeNurses(list) {
         const headCode = Number.isFinite(Number(n.headCode)) ? Number(n.headCode) : 5;
         const level = Number.isFinite(Number(n.level)) ? Number(n.level) : 1;
         const isAdminFlag = !!n.isAdmin;
+        const screenWeekdayOnly = !!n.screenWeekdayOnly;
+        const procWeekdayOnly = !!n.procWeekdayOnly;
         cleaned.push({
             ...n,
             id,
@@ -53,7 +55,9 @@ function normalizeNurses(list) {
             roles,
             headCode,
             level,
-            isAdmin: isAdminFlag
+            isAdmin: isAdminFlag,
+            screenWeekdayOnly,
+            procWeekdayOnly
         });
     });
     return cleaned;
@@ -757,7 +761,7 @@ function scrollToAlerts() {
 }
 
 // ──────────────── Generate Schedule ────────────────
-async function generateSchedule() {
+async function generateSchedule(resetLeaves = false) {
     if (!isAdmin) {
         showToast('error', 'เฉพาะหัวหน้าเวรเท่านั้นที่สามารถสร้างตารางได้ (รักษาสิทธิ์ Admin)');
         return;
@@ -803,7 +807,32 @@ async function generateSchedule() {
             return;
         }
 
+        let existingLeaves = null;
+        if (!resetLeaves) {
+            const currentRaw = localStorage.getItem(getStorageKey());
+            if (currentRaw) {
+                try {
+                    const currentData = JSON.parse(currentRaw);
+                    existingLeaves = currentData?.leaves || null;
+                } catch (e) {
+                    existingLeaves = null;
+                }
+            }
+        }
+
         scheduler = new NurseScheduler(activeNurses, currentMonth, currentYear, prevSchedule);
+        if (!resetLeaves && existingLeaves && typeof existingLeaves === 'object') {
+            const leaveList = [];
+            Object.entries(existingLeaves).forEach(([dateStr, arr]) => {
+                (arr || []).forEach(l => {
+                    if (!l || !l.nurseId) return;
+                    leaveList.push({ ...l, dateStr });
+                });
+            });
+            if (leaveList.length > 0) {
+                scheduler.setLeaves(leaveList);
+            }
+        }
         scheduler.generate();
         
         saveToStorage(); 
@@ -824,7 +853,7 @@ function regenerateSchedule() {
         return;
     }
     if (!confirm('ต้องการสร้างตารางเวรใหม่หรือไม่?\nข้อมูลการลาและสลับเวรของเดือนนี้จะถูกรีเซ็ต')) return;
-    generateSchedule();
+    generateSchedule(true);
 }
 
 function clearSchedule() {
@@ -1120,17 +1149,7 @@ function renderCalendar() {
                 </div>
             </div>`;
 
-        // Leave box (Condensed for grid)
-        if (dayLeaves.length > 0) {
-            html += `<div class="leave-box mini">
-                <div class="leave-list mini">`;
-            dayLeaves.forEach(l => {
-                const cls = (l.urgent ? 'leave-urgent' : 'leave-normal') + (isAdmin || l.nurseId === currentUser ? ' clickable' : '');
-                const onclick = (isAdmin || l.nurseId === currentUser) ? `onclick="removeLeaveManually('${l.nurseId}', '${ds}')"` : '';
-                html += `<span class="leave-tag mini ${cls}" title="ลา: ${escAttr(l.nurseName)}" ${onclick}>${escHtml(l.nurseName.split(' ')[0])}</span>`;
-            });
-            html += `</div></div>`;
-        }
+        // Hide leave box in main calendar (show only staffing by roles)
 
         // Shifts
         if (daySchedule) {
@@ -1148,6 +1167,7 @@ function renderCalendar() {
                     <div class="nurse-mini-list">`;
 
                 assignments.forEach(a => {
+                    if (a.isLeave || a.isLeavePlaceholder) return;
                     const hasPendingSwap = dayPendingSwaps.some(r => r.data.originalNurseId === a.nurseId && r.data.shift === shift);
                     const hasPendingLeave = dayPendingLeaves.some(r => r.data.nurseId === a.nurseId);
 
@@ -1170,7 +1190,7 @@ function renderCalendar() {
                         'Inc_screen_center': { short: 'ISC', color: '#f97316' }, // Orange-500
                         'Screen_6_8': { short: 'S68', color: '#ca8a04' }, // Yellow-600
                         'Proc_16_20': { short: 'P16', color: '#db2777' }, // Pink-600
-                        'Preceptor': { short: 'ช+', color: '#7c3aed' } // Violet-600 (morning+)
+                        'Preceptor': { short: 'ชP', color: '#7c3aed' } // Violet-600 (morning+)
                     };
                     const rTag = roleMapping[a.role] || { short: a.role.substring(0, 2).toUpperCase(), color: '#94a3b8' };
 
@@ -1521,25 +1541,27 @@ function renderStats() {
 
     const stats = scheduler.getStats();
     const container = document.getElementById('statsContent');
+    const leaveTypeKeys = Object.keys(LEAVE_TYPES);
 
     // Calculate Department Totals
     const totals = {
-        M: 0, A: 0, N: 0, totalShifts: 0,
-        sick: 0, personal: 0, vacation: 0, training: 0, preceptor: 0, totalLeaves: 0
+        M: 0, A: 0, N: 0, totalShifts: 0, totalLeaves: 0
     };
+    leaveTypeKeys.forEach(k => { totals[k] = 0; });
 
     Object.values(stats).forEach(s => {
         totals.M += s.shifts.M;
         totals.A += s.shifts.A;
         totals.N += s.shifts.N;
         totals.totalShifts += s.shifts.total;
-        totals.sick += s.leaves.sick || 0;
-        totals.personal += s.leaves.personal || 0;
-        totals.vacation += s.leaves.vacation || 0;
-        totals.training += s.leaves.training || 0;
-        totals.preceptor += s.leaves.preceptor || 0;
+        leaveTypeKeys.forEach(k => { totals[k] += s.leaves[k] || 0; });
         totals.totalLeaves += s.leaves.total;
     });
+
+    const leaveSummaryHtml = leaveTypeKeys.map(k => (
+        `<span>${LEAVE_TYPES[k].label}: <b>${totals[k]}</b></span>`
+    )).join('');
+    const leaveHeaderHtml = leaveTypeKeys.map(k => `<th>${LEAVE_TYPES[k].label}</th>`).join('');
 
     let html = `
     <div class="stats-summary-dashboard" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:20px; margin-bottom:24px;">
@@ -1556,11 +1578,7 @@ function renderStats() {
             <div class="summary-label" style="font-size:14px; color:var(--text-muted); margin-bottom:8px;">สถิติการลาหยุด (รวมทุกประเภท)</div>
             <div class="summary-value" style="font-size:32px; font-weight:800; color:#f43f5e; line-height:1;">${totals.totalLeaves} <small style="font-size:14px; font-weight:400">วัน</small></div>
             <div class="summary-sub" style="margin-top:12px; font-size:13px; color:var(--text-secondary); display:grid; grid-template-columns:1fr 1fr; gap:4px 12px;">
-                <span>ป่วย: <b>${totals.sick}</b></span>
-                <span>กิจ: <b>${totals.personal}</b></span>
-                <span>พักผ่อน: <b>${totals.vacation}</b></span>
-                <span>อบรม: <b>${totals.training}</b></span>
-                <span>Preceptor: <b>${totals.preceptor}</b></span>
+                ${leaveSummaryHtml}
             </div>
         </div>
     </div>
@@ -1581,11 +1599,7 @@ function renderStats() {
               <th>บ่าย (A)</th>
               <th>ดึก (N)</th>
               <th>รวมเวร</th>
-              <th>ลาป่วย</th>
-              <th>ลากิจ</th>
-              <th>ลาพักผ่อน</th>
-              <th>ลาอบรม</th>
-              <th>Preceptor</th>
+              ${leaveHeaderHtml}
               <th>รวมลา</th>
             </tr>
           </thead>
@@ -1594,6 +1608,7 @@ function renderStats() {
     Object.values(stats)
         .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
         .forEach(s => {
+            const leaveCells = leaveTypeKeys.map(k => `<td class="num-cell stat-leave">${s.leaves[k] || 0}</td>`).join('');
             html += `<tr>
         <td style="font-family:var(--font-en);font-size:12px;color:var(--text-muted)">${s.id}</td>
         <td class="name-cell">${escHtml(s.name)}</td>
@@ -1603,11 +1618,7 @@ function renderStats() {
         <td class="num-cell stat-a">${s.shifts.A}</td>
         <td class="num-cell stat-n">${s.shifts.N}</td>
         <td class="num-cell stat-total">${s.shifts.total}</td>
-        <td class="num-cell stat-leave">${s.leaves.sick || 0}</td>
-        <td class="num-cell stat-leave">${s.leaves.personal || 0}</td>
-        <td class="num-cell stat-leave">${s.leaves.vacation || 0}</td>
-        <td class="num-cell stat-leave">${s.leaves.training || 0}</td>
-        <td class="num-cell stat-leave">${s.leaves.preceptor || 0}</td>
+        ${leaveCells}
         <td class="num-cell stat-leave" style="font-weight:700">${s.leaves.total}</td>
       </tr>`;
         });
@@ -1691,7 +1702,7 @@ function renderNurseSummary(targetNurseId = null) {
                 let note = '';
                 if (assignment.isLeave) {
                     status = 'แจ้งลา';
-                    note = `${assignment.leaveType === 'sick' ? 'ลาป่วย' : assignment.leaveType === 'personal' ? 'ลากิจ' : assignment.leaveType === 'vacation' ? 'ลาพักผ่อน' : assignment.leaveType === 'preceptor' ? 'ลา Preceptor' : 'ลาอบรม'}${assignment.urgent ? ' (ฉุกเฉิน)' : ''}`;
+                    note = `${getLeaveTypeLabel(assignment.leaveType)}${assignment.urgent ? ' (ฉุกเฉิน)' : ''}`;
                 } else if (assignment.swappedFrom) {
                     const original = activeNurses.find(n => n.id === assignment.swappedFrom);
                     status = 'ขึ้นแทน';
@@ -1926,7 +1937,7 @@ function renderRequestStatus() {
                 context += `<br><span style="color:var(--warning); font-size:10px;">⚠️ คำขอฉุกเฉิน: มีการผ่อนปรนกฎ</span>`;
             }
         } else {
-            context = r.data.leaveType === 'off' ? 'ขอหยุด' : `ลา (${r.data.leaveType})`;
+            context = getLeaveTypeLabel(r.data.leaveType);
         }
 
         const canCancel = r.senderId === currentUser && r.status.includes('pending');
@@ -2027,6 +2038,10 @@ function getLeaveLimitForLevel(level) {
     return Number.isFinite(val) ? val : 0;
 }
 
+function getLeaveTypeLabel(leaveType) {
+    return LEAVE_TYPES[leaveType]?.label || leaveType || 'ลา';
+}
+
 function getNurseLevelById(nurseId, nurseList) {
     const list = Array.isArray(nurseList) ? nurseList : activeNurses;
     const nurse = list.find(n => n.id === nurseId);
@@ -2111,20 +2126,30 @@ function openLeaveModal() {
         return;
     }
 
+    const canChooseLeaveNurse = currentUser === 'admin';
     const sel = document.getElementById('leaveNurse');
-    sel.innerHTML = '<option value="">-- เลือกพยาบาล --</option>';
-    
-    // Always use activeNurses instead of scheduler.nurses to ensure everyone is available
-    activeNurses.forEach(n => {
-        sel.innerHTML += `<option value="${n.id}">${n.name}</option>`;
-    });
+    const currentNurse = activeNurses.find(n => n.id === currentUser);
 
-    if (!isAdmin) {
-        sel.value = currentUser;
-        sel.disabled = true;
-    } else {
+    if (canChooseLeaveNurse) {
+        sel.innerHTML = '<option value="">-- เลือกพยาบาล --</option>';
+        // Always use activeNurses instead of scheduler.nurses to ensure everyone is available
+        activeNurses.forEach(n => {
+            sel.innerHTML += `<option value="${n.id}">${n.name}</option>`;
+        });
         sel.disabled = false;
         sel.value = '';
+    } else {
+        const nurseName = currentNurse ? currentNurse.name : currentUser;
+        sel.innerHTML = `<option value="${currentUser}">${nurseName}</option>`;
+        sel.value = currentUser;
+        sel.disabled = true;
+    }
+
+    const title = document.getElementById('leaveModalTitle');
+    if (title) {
+        title.textContent = canChooseLeaveNurse
+            ? '📋 แจ้งลา / ขอหยุด'
+            : `📋 ${currentNurse ? currentNurse.name : currentUser}`;
     }
 
     const monthStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
@@ -2159,7 +2184,8 @@ function openLeaveModal() {
 }
 
 function submitLeave() {
-    const nurseId = isAdmin ? document.getElementById('leaveNurse').value : currentUser;
+    const canChooseLeaveNurse = currentUser === 'admin';
+    const nurseId = canChooseLeaveNurse ? document.getElementById('leaveNurse').value : currentUser;
     const leaveType = document.getElementById('leaveType').value;
     const startDate = document.getElementById('leaveStartDate').value;
     const endDate = document.getElementById('leaveEndDate').value;
@@ -2185,7 +2211,7 @@ function submitLeave() {
     // If Admin is submitting for someone else, apply directly? 
     // User said "Everyone can submit... Head approves". 
     // I'll make it a request regardless, or if Admin, approve immediately.
-    if (isAdmin) {
+    if (canChooseLeaveNurse) {
         let count = 0;
         const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
@@ -2521,8 +2547,14 @@ function exportData() {
         csv = scheduler.exportStatsCSV();
         filename = `สถิติเวร_${THAI_MONTHS[currentMonth]}_${currentYear + 543}.csv`;
     } else {
-        csv = scheduler.exportCalendarCSV();
-        filename = `ตารางเวร_${THAI_MONTHS[currentMonth]}_${currentYear + 543}.csv`;
+        const byRole = confirm('ต้องการส่งออกแบบแยกตำแหน่งต่อคน (ER/หัตถการ/คัดกรอง) หรือไม่?');
+        if (byRole) {
+            csv = scheduler.exportCalendarCSVByRole();
+            filename = `ตารางเวร_แยกตำแหน่ง_${THAI_MONTHS[currentMonth]}_${currentYear + 543}.csv`;
+        } else {
+            csv = scheduler.exportCalendarCSV();
+            filename = `ตารางเวร_${THAI_MONTHS[currentMonth]}_${currentYear + 543}.csv`;
+        }
     }
 
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -2714,6 +2746,8 @@ function openAddNurseModal() {
     setNurseLevel(1);
     document.getElementById('nurseHeadCode').value = '5';
     document.getElementById('nurseIsAdmin').checked = false;
+    document.getElementById('nurseScreenWeekdayOnly').checked = false;
+    document.getElementById('nurseProcWeekdayOnly').checked = false;
     renderRoleCheckboxes([]);
     openModal('nurseModal');
 }
@@ -2729,6 +2763,8 @@ function openEditNurseModal(id) {
     setNurseLevel(n.level);
     document.getElementById('nurseHeadCode').value = n.headCode;
     document.getElementById('nurseIsAdmin').checked = !!n.isAdmin;
+    document.getElementById('nurseScreenWeekdayOnly').checked = !!n.screenWeekdayOnly;
+    document.getElementById('nurseProcWeekdayOnly').checked = !!n.procWeekdayOnly;
     renderRoleCheckboxes(n.roles);
     openModal('nurseModal');
 }
@@ -2771,6 +2807,8 @@ function saveNurse() {
 
     const headCode = parseInt(headCodeStr);
     const isAdminFlag = document.getElementById('nurseIsAdmin').checked;
+    const screenWeekdayOnly = document.getElementById('nurseScreenWeekdayOnly').checked;
+    const procWeekdayOnly = document.getElementById('nurseProcWeekdayOnly').checked;
 
     const roleChecks = document.querySelectorAll('#nurseRolesList input:checked');
     const roles = Array.from(roleChecks).map(c => c.value);
@@ -2784,7 +2822,7 @@ function saveNurse() {
         return;
     }
 
-    const nurseObj = { id: code, name, headCode, level, roles, isAdmin: isAdminFlag };
+    const nurseObj = { id: code, name, headCode, level, roles, isAdmin: isAdminFlag, screenWeekdayOnly, procWeekdayOnly };
 
     if (editId) {
         const idx = activeNurses.findIndex(n => n.id === editId);
@@ -3039,14 +3077,25 @@ function handleCSVImport(input) {
                         const nurseName = nurse ? nurse.name : nurseId;
 
                         const leaveMap = {
-                            'ป': 'sick',
+                            'off': 'off',
+                            'OFF': 'off',
+                            'X': 'off',
+                            'x': 'off',
                             'ก': 'personal',
+                            'ป': 'sick',
                             'ผ': 'vacation',
                             'V': 'vacation',
                             'อ': 'training',
                             'ชพ': 'preceptor',
                             'ชP': 'preceptor',
-                            'ช+': 'preceptor'
+                            'ช+': 'preceptor',
+                            'ศษ': 'education',
+                            'ศ': 'religious',
+                            'ต': 'military',
+                            'ค': 'maternity',
+                            'ชภ': 'paternity',
+                            'ท': 'sterilization',
+                            'ลา': 'off'
                         };
 
                         // New compact codes: ช, บ, ด (+ i) and leave codes
@@ -3054,7 +3103,7 @@ function handleCSVImport(input) {
                             const leaveType = leaveMap[token];
                             const shiftLabel = 'M'; // default for leave-only code
                             const role = leaveType === 'preceptor' ? 'Preceptor' : 'Med';
-                            const roleLabel = leaveType === 'preceptor' ? 'Preceptor+' : ROLE_LABELS['Med'];
+                            const roleLabel = leaveType === 'preceptor' ? 'Preceptor P' : ROLE_LABELS['Med'];
                             newSchedule[ds][shiftLabel].push({
                                 nurseId,
                                 nurseName,

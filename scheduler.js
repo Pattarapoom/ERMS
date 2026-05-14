@@ -75,6 +75,22 @@ class NurseScheduler {
                 return false;
             }
         }
+        // Procedure morning (ชG) only on weekdays
+        if (this.isWeekend(day) && (role === 'Inc_proc' || role === 'Med_proc')) {
+            return false;
+        }
+        if (nurse.screenWeekdayOnly) {
+            const screenRoles = ['Screen_center', 'Inc_screen_center', 'Screen_6_8', 'Screen_16_20'];
+            if (screenRoles.includes(role) && this.isWeekend(day)) {
+                return false;
+            }
+        }
+        if (nurse.procWeekdayOnly) {
+            const procRoles = ['Inc_proc', 'Med_proc'];
+            if (procRoles.includes(role) && this.isWeekend(day)) {
+                return false;
+            }
+        }
         // Screen 6-8 must be able to continue in morning (Screen_center or ER/Med)
         if (role === 'Screen_6_8') {
             const canContinue = nurse.roles.includes('Screen_center') || nurse.roles.includes('Inc_screen_center') || nurse.roles.includes('Med');
@@ -188,10 +204,15 @@ class NurseScheduler {
     // ──────────────── Fairness Scoring ────────────────
     fairnessScore(nurseId, shift) {
         const c = this.counters[nurseId];
-        // Primary: fewer total shifts first
-        // Secondary: fewer night shifts
-        // Tertiary: fewer shifts of this type
-        return c.total * 1000 + c.N * 100 + (c[shift] || 0) * 10;
+        // Primary: balance per-shift counts (stronger weight)
+        // Secondary: overall total shifts
+        // Tertiary: avoid too many nights when assigning other shifts
+        const shiftCount = (c[shift] || 0);
+        const shiftWeight = 1000;
+        const totalWeight = 50;
+        const nightWeight = 150;
+        const nightPenalty = (shift !== 'N') ? (c.N * nightWeight) : 0;
+        return (shiftCount * shiftWeight) + (c.total * totalWeight) + nightPenalty;
     }
 
     // ──────────────── Generate Schedule ────────────────
@@ -359,7 +380,7 @@ class NurseScheduler {
                     nurseId,
                     nurseName: nurse ? nurse.name : nurseId,
                     role: 'Preceptor',
-                    roleLabel: 'Preceptor+',
+                    roleLabel: 'Preceptor P',
                     isLeave: true,
                     leaveType,
                     urgent,
@@ -548,9 +569,13 @@ class NurseScheduler {
     // ──────────────── Stats ────────────────
     getStats() {
         const stats = {};
+        const leaveTypeKeys = (typeof LEAVE_TYPES !== 'undefined')
+            ? Object.keys(LEAVE_TYPES)
+            : ['off', 'personal', 'sick', 'vacation', 'training', 'preceptor', 'education', 'religious', 'military', 'maternity', 'paternity', 'sterilization'];
         this.nurses.forEach(n => {
             const c = this.counters[n.id];
-            const leaveCount = { sick: 0, personal: 0, vacation: 0, training: 0, preceptor: 0, total: 0 };
+            const leaveCount = { total: 0 };
+            leaveTypeKeys.forEach(k => { leaveCount[k] = 0; });
             Object.values(this.leaves).forEach(dayLeaves => {
                 dayLeaves.forEach(l => {
                     if (l.nurseId === n.id) {
@@ -574,18 +599,26 @@ class NurseScheduler {
 
     // ──────────────── Export Helpers ────────────────
     exportCalendarCSV() {
-        const shiftCode = (shift, role) => {
+        const shiftCode = (shift, role, suffix = '') => {
             const base = shift === 'M' ? 'ช' : (shift === 'A' ? 'บ' : (shift === 'N' ? 'ด' : shift));
+            if (suffix) return shift === 'M' ? `${base}${suffix}` : base;
             const isIncharge = typeof role === 'string' && role.toLowerCase().includes('incharge');
             return isIncharge ? `${base}i` : base;
         };
         const leaveCode = (leaveType) => {
             switch (leaveType) {
-                case 'sick': return 'ป';
+                case 'off': return 'off';
                 case 'personal': return 'ก';
+                case 'sick': return 'ป';
                 case 'vacation': return 'ผ';
                 case 'training': return 'อ';
-                case 'preceptor': return 'ชพ';
+                case 'preceptor': return 'ชP';
+                case 'education': return 'ศษ';
+                case 'religious': return 'ศ';
+                case 'military': return 'ต';
+                case 'maternity': return 'ค';
+                case 'paternity': return 'ชภ';
+                case 'sterilization': return 'ท';
                 default: return 'ลา';
             }
         };
@@ -604,6 +637,12 @@ class NurseScheduler {
             let row = `${n.id},${displayName}`;
             for (let d = 1; d <= this.daysInMonth; d++) {
                 const ds = this.dateStr(d);
+                const dayLeaves = (this.leaves && this.leaves[ds]) ? this.leaves[ds] : [];
+                const leaveHit = dayLeaves.find(l => l.nurseId === n.id);
+                if (leaveHit) {
+                    row += `,"${leaveCode(leaveHit.leaveType)}"`;
+                    continue;
+                }
                 let shifts = [];
                 const daySchedule = this.schedule[ds];
                 if (daySchedule) {
@@ -627,13 +666,117 @@ class NurseScheduler {
         return csv;
     }
 
+    exportCalendarCSVByRole() {
+        const shiftCode = (shift, role) => {
+            const base = shift === 'M' ? 'ช' : (shift === 'A' ? 'บ' : (shift === 'N' ? 'ด' : shift));
+            const isIncharge = typeof role === 'string' && role.toLowerCase().includes('incharge');
+            return isIncharge ? `${base}i` : base;
+        };
+        const leaveCode = (leaveType) => {
+            switch (leaveType) {
+                case 'off': return 'off';
+                case 'personal': return 'ก';
+                case 'sick': return 'ป';
+                case 'vacation': return 'ผ';
+                case 'training': return 'อ';
+                case 'preceptor': return 'ชP';
+                case 'education': return 'ศษ';
+                case 'religious': return 'ศ';
+                case 'military': return 'ต';
+                case 'maternity': return 'ค';
+                case 'paternity': return 'ชภ';
+                case 'sterilization': return 'ท';
+                default: return 'ลา';
+            }
+        };
+
+        const roleRows = [
+            {
+                label: 'ER',
+                suffix: '',
+                roles: new Set(['Head', 'Incharge1', 'Incharge_team', 'Fast_track', 'Triage', 'Med']),
+                autoFill: true,
+                showLeave: true
+            },
+            {
+                label: 'หัตถการ',
+                suffix: 'G',
+                roles: new Set(['Inc_proc', 'Med_proc', 'Proc_16_20']),
+                autoFill: true,
+                showLeave: false
+            },
+            {
+                label: 'คัดกรอง',
+                suffix: 'S',
+                roles: new Set(['Screen_center', 'Inc_screen_center', 'Screen_6_8', 'Screen_16_20']),
+                autoFill: true,
+                showLeave: false
+            }
+        ];
+
+        let csv = 'ชื่อ,ตำแหน่ง';
+        for (let d = 1; d <= this.daysInMonth; d++) {
+            csv += `,${d}`;
+        }
+        csv += '\n';
+
+        this.nurses.forEach(n => {
+            const fallbackName = (typeof activeNurses !== 'undefined' && Array.isArray(activeNurses))
+                ? (activeNurses.find(x => x.id === n.id)?.name || '')
+                : '';
+            const displayName = n.name || fallbackName || n.id;
+
+            roleRows.forEach(rowDef => {
+                let row = `${displayName},${rowDef.label}`;
+                for (let d = 1; d <= this.daysInMonth; d++) {
+                    const ds = this.dateStr(d);
+                    let leaveVal = null;
+                    if (rowDef.showLeave) {
+                        const dayLeaves = (this.leaves && this.leaves[ds]) ? this.leaves[ds] : [];
+                        const leaveHit = dayLeaves.find(l => l.nurseId === n.id);
+                        if (leaveHit) leaveVal = leaveCode(leaveHit.leaveType);
+                    }
+                    if (leaveVal) {
+                        row += `,"${leaveVal}"`;
+                        continue;
+                    }
+
+                    const daySchedule = this.schedule[ds];
+                    let shifts = [];
+                    if (rowDef.autoFill && daySchedule) {
+                        for (const shift of ['M', 'A', 'N']) {
+                            const a = daySchedule[shift].find(x => x.nurseId === n.id);
+                            if (a && !a.isLeave && rowDef.roles.has(a.role)) {
+                                if (rowDef.label === 'คัดกรอง' && a.role === 'Screen_6_8') {
+                                    shifts.push('6');
+                                } else {
+                                    shifts.push(shiftCode(shift, a.role, rowDef.suffix));
+                                }
+                            }
+                        }
+                    }
+                    const val = shifts.length > 0 ? shifts.join('/') : '-';
+                    row += `,"${val}"`;
+                }
+                csv += row + '\n';
+            });
+        });
+
+        return csv;
+    }
+
     exportStatsCSV() {
         const stats = this.getStats();
-        let csv = 'รหัส,ชื่อ,HeadCode,Level,เช้า(M),บ่าย(A),ดึก(N),รวมเวร,ลาป่วย,ลากิจ,ลาพักผ่อน,ลาอบรม,ลา Preceptor,รวมลา\n';
+        const leaveTypeKeys = (typeof LEAVE_TYPES !== 'undefined')
+            ? Object.keys(LEAVE_TYPES)
+            : ['off', 'personal', 'sick', 'vacation', 'training', 'preceptor', 'education', 'religious', 'military', 'maternity', 'paternity', 'sterilization'];
+        const leaveLabels = leaveTypeKeys.map(k => (typeof LEAVE_TYPES !== 'undefined' && LEAVE_TYPES[k]) ? LEAVE_TYPES[k].label : k);
+        let csv = `รหัส,ชื่อ,HeadCode,Level,เช้า(M),บ่าย(A),ดึก(N),รวมเวร,${leaveLabels.join(',')},รวมลา\n`;
         Object.values(stats)
             .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
             .forEach(s => {
-                csv += `${s.id},${s.name},${s.headCode},${s.level},${s.shifts.M},${s.shifts.A},${s.shifts.N},${s.shifts.total},${s.leaves.sick},${s.leaves.personal},${s.leaves.vacation},${s.leaves.training},${s.leaves.preceptor},${s.leaves.total}\n`;
+                const leaveCounts = leaveTypeKeys.map(k => s.leaves[k] || 0);
+                csv += `${s.id},${s.name},${s.headCode},${s.level},${s.shifts.M},${s.shifts.A},${s.shifts.N},${s.shifts.total},${leaveCounts.join(',')},${s.leaves.total}\n`;
             });
         return csv;
     }

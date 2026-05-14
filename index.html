@@ -303,7 +303,7 @@
   <div class="modal-overlay" id="leaveModal">
     <div class="modal">
       <div class="modal-header">
-        <h3>📋 แจ้งลา / ขอหยุด</h3>
+        <h3 id="leaveModalTitle">📋 แจ้งลา / ขอหยุด</h3>
         <button class="modal-close">&times;</button>
       </div>
       <div class="modal-body">
@@ -316,11 +316,18 @@
         <div class="form-group">
           <label for="leaveType">ประเภทการลา</label>
           <select id="leaveType">
-            <option value="sick">🤒 ลาป่วย</option>
+            <option value="off">⏸️ ขอหยุด</option>
             <option value="personal">📋 ลากิจ</option>
+            <option value="sick">🤒 ลาป่วย</option>
             <option value="vacation">🌴 ลาพักผ่อน</option>
             <option value="training">📚 ลาอบรม</option>
             <option value="preceptor">🎓 Preceptor</option>
+            <option value="education">🏫 ลาศึกษา</option>
+            <option value="religious">🙏 ลาประกอบพิธีทางศาสนา</option>
+            <option value="military">🪖 ลาเข้ารับการเตรียมพล</option>
+            <option value="maternity">🍼 ลาคลอด</option>
+            <option value="paternity">👶 ลาไปช่วยเหลือภริยาที่คลอดบุตร</option>
+            <option value="sterilization">🏥 ลาทำหมัน</option>
           </select>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -431,6 +438,18 @@
           <div id="nurseRolesList" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <!-- Checkboxes will be injected here -->
           </div>
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="nurseScreenWeekdayOnly" style="width:18px; height:18px; cursor:pointer;">
+          <label for="nurseScreenWeekdayOnly" style="margin:0; cursor:pointer;">
+            คัดกรอง (ชS/6) เฉพาะวันทำการ
+          </label>
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="nurseProcWeekdayOnly" style="width:18px; height:18px; cursor:pointer;">
+          <label for="nurseProcWeekdayOnly" style="margin:0; cursor:pointer;">
+            หัตถการ (ชG) เฉพาะวันทำการ
+          </label>
         </div>
 
         <!-- Admin Permission -->
